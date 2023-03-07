@@ -6,8 +6,8 @@ def plot_solution(system, filename=None, num=1, smooth=True, limits=None):
     sol = system.result
     grid = system.grid
 
-    title = r'$\omega = {:1.4f}, k_x = {:1.2f}, m={}$'
-    plt.figure(num)
+    title = r'$\omega = {:1.4f}, k_x = {:1.2f}\pi, m={}$'
+    plt.figure(num, figsize=(12, 2*system.dim))
     plt.clf()
     fig, axes = plt.subplots(num=num, nrows=system.dim, sharex=True)
     for j, var in enumerate(system.variables):
@@ -16,35 +16,29 @@ def plot_solution(system, filename=None, num=1, smooth=True, limits=None):
                 z = np.linspace(grid.zmin, grid.zmax, 2000)
             else:
                 z = np.linspace(limits[0], limits[1], 2000)
-            # var_interp = grid.interpolate(z, sol[var])
-            # axes[j].plot(
-            #     z, var_interp.real, 'C0', label='Real'
-            # )
-            # axes[j].plot(
-            #     z, var_interp.imag, 'C1', label='Imag'
-            # )
             axes[j].plot(
-                z, grid.interpolate(z, sol[var].real), 'C0', label='Real'
+                z, grid.interpolate(z, sol[var].real), 'C0', linewidth=0.2
             )
             axes[j].plot(
-                z, grid.interpolate(z, sol[var].imag), 'C1', label='Imag'
+                z, grid.interpolate(z, sol[var].imag), 'C1', linewidth=0.2
             )
-        axes[j].plot(grid.zg, sol[var].real, 'C0.', label='Real')
-        axes[j].plot(grid.zg, sol[var].imag, 'C1.', label='Imag')
-        axes[j].set_ylabel(system.labels[j])
+        axes[j].plot(grid.zg, sol[var].real, 'C0.', markersize=1.0, label='Real')
+        axes[j].plot(grid.zg, sol[var].imag, 'C1.', markersize=1.0, label='Imag')
+        axes[j].set_ylabel(system.labels[j], fontsize=8)
+        axes[j].tick_params(axis='both', which='major', labelsize=7)
+        axes[j].ticklabel_format(axis='y', scilimits=(-2,2), useMathText=True)
+        axes[j].yaxis.offsetText.set_fontsize(6)
     axes[system.dim - 1].set_xlabel(r"$z$")
     try:
-        axes[0].set_title(
-            title.format(sol[system.eigenvalue], system.kx, sol['mode'])
-        )
+        axes[0].set_title(title.format(sol[system.eigenvalue], system.kx/np.pi, sol['mode']), fontsize=10)
     except:
-        axes[0].set_title(
-            r'$\omega$ = {:1.6f}'.format(sol[system.eigenvalue])
-        )
-    axes[0].legend(frameon=False)
+        axes[0].set_title(r'$\omega$ = {:1.6f}'.format(sol[system.eigenvalue]), fontsize=10)
+    axes[0].legend(frameon=False, fontsize=7)
 
+    if limits is not None:
+        axes[0].set_xlim(limits[0], limits[1])
     if filename is not None:
-        fig.savefig(filename)
+        fig.savefig(filename, bbox_inches='tight', dpi=300)
     else:
         plt.show()
 
