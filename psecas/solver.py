@@ -181,7 +181,7 @@ class Solver:
         if self.do_gen_evp:
             self.get_matrix2()
             if useOPinv:
-                from numpy.linalg import inv
+                from numpy.linalg import inv, LinAlgError
                 try:
                     OPinv = inv((self.mat1 - guess * self.mat2).toarray())
                     sigma, v = eigs(self.mat1, k=1, sigma=guess, OPinv=OPinv)
@@ -191,7 +191,7 @@ class Solver:
                 sigma, v = eigs(self.mat1, M=self.mat2, k=1, sigma=guess)
         else:
             if useOPinv:
-                from numpy.linalg import inv
+                from numpy.linalg import inv, LinAlgError
                 try:
                     OPinv = inv(self.mat1 - guess * np.eye(self.mat1.shape[0]))
                     sigma, v = eigs(self.mat1, k=1, sigma=guess, OPinv=OPinv)
