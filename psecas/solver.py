@@ -207,19 +207,21 @@ class Solver:
         return (sigma, v)
 
     def iterate_solver(
-        self, Ns, mode=0, tol=1e-6, atol=1e-16, verbose=False, guess_tol=0.01,
+        self, Ns, mode=0, rtol=1e-6, atol=1e-16, verbose=False, guess_tol=0.01,
         useOPinv=True
     ):
         """
         Iteratively call the solve method with increasing grid resolution, N.
         Returns when the relative difference in the eigenvalue is less than
-        the tolerance, tol.
+        the tolerance, rtol.
 
         Ns: list of resolutions to try, e.g. Ns = arange(32)*10
 
         mode: the index in the list of eigenvalues returned from solve
 
-        tol: the target precision of the eigenvalue
+        rtol: the relative tolerance of the eigenvalue solver
+
+        atol: the absolute tolerance of the eigenvalue solver
 
         verbose (default False): print out information about the calculation.
 
@@ -238,13 +240,12 @@ class Solver:
         (sigma_old, v) = self.solve(mode=mode, verbose=verbose)
         self.grid.N = Ns[1]
         (sigma_new, v) = self.solve(mode=mode, verbose=verbose)
-        a_err = np.abs(sigma_old - sigma_new)
-        r_err = a_err / np.abs(sigma_old)
+        err = np.abs(sigma_old - sigma_new) / (atol + rtol*max(np.abs(sigma_old), np.abs(sigma_new)))
 
         for i in range(2, len(Ns)):
             self.grid.N = Ns[i]
             # Not a good guess yet
-            if r_err > guess_tol:
+            if err > guess_tol / rtol:
                 (sigma_new, v) = self.solve(mode=mode, verbose=verbose)
             # Use guess from previous iteration
             else:
@@ -252,19 +253,18 @@ class Solver:
                     sigma_old, mode=mode, verbose=verbose, useOPinv=useOPinv
                 )
 
-            a_err = np.abs(sigma_old - sigma_new)
-            r_err = a_err / np.abs(sigma_old)
+            err = np.abs(sigma_old - sigma_new) / (atol + rtol*max(np.abs(sigma_old), np.abs(sigma_new)))
             # Converged
-            if r_err < tol or a_err < atol:
+            if err <= 1:
                 self.system.result.update({"converged": True})
-                self.system.result.update({"r_err": r_err, "a_err": a_err})
-                return (sigma_new, v, r_err)
+                self.system.result.update({"error": err})
+                return (sigma_new, v, err)
             # Overwrite old with new
             sigma_old = np.copy(sigma_new)
 
         self.system.result.update({"converged": False})
-        self.system.result.update({"r_err": r_err, "a_err": a_err})
-        return (sigma_new, v, r_err)
+        self.system.result.update({"error": err})
+        return (sigma_new, v, err)
 
         # raise RuntimeError("Did not converge!")
 
