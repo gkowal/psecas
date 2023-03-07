@@ -133,7 +133,7 @@ class Solver:
             self.E = E[index]
             self.v = V[:, index]
         if verbose:
-            print("N: {}, all eigenvalues: {}".format(self.grid.N, sigma))
+            print("N: {:7d}, all eigenvalues:  {:.8e}".format(self.grid.N, sigma))
 
         self.keep_result(sigma, v, mode)
 
@@ -205,7 +205,7 @@ class Solver:
         v = np.squeeze(v)
 
         if verbose:
-            print("N:{}, only 1 eigenvalue:{}".format(self.grid.N, sigma))
+            print("N: {:7d}, one eigenvalue :  {:.8e}".format(self.grid.N, sigma))
 
         self.keep_result(sigma, v, mode)
 
