@@ -182,18 +182,23 @@ class Solver:
             self.get_matrix2()
             if useOPinv:
                 from numpy.linalg import inv
-                OPinv = inv((self.mat1 - guess * self.mat2).toarray())
-                sigma, v = eigs(self.mat1, k=1, sigma=guess, OPinv=OPinv)
-            else:    
+                try:
+                    OPinv = inv((self.mat1 - guess * self.mat2).toarray())
+                    sigma, v = eigs(self.mat1, k=1, sigma=guess, OPinv=OPinv)
+                except LinAlgError:
+                    sigma, v = np.zeros([1], dtype=np.complex64), np.zeros([self.mat1.shape[0], 1], dtype=np.complex64)
+            else:
                 sigma, v = eigs(self.mat1, M=self.mat2, k=1, sigma=guess)
         else:
             if useOPinv:
                 from numpy.linalg import inv
-                OPinv = inv(self.mat1 - guess * np.eye(self.mat1.shape[0]))
-                sigma, v = eigs(self.mat1, k=1, sigma=guess, OPinv=OPinv)
+                try:
+                    OPinv = inv(self.mat1 - guess * np.eye(self.mat1.shape[0]))
+                    sigma, v = eigs(self.mat1, k=1, sigma=guess, OPinv=OPinv)
+                except LinAlgError:
+                    sigma, v = np.zeros([1], dtype=np.complex64), np.zeros([self.mat1.shape[0], 1], dtype=np.complex64)
             else:
                 sigma, v = eigs(self.mat1, k=1, sigma=guess)
-                
 
         # Convert result from eigs to have same format as result from eig
         sigma = sigma[0]
