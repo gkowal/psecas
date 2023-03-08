@@ -36,6 +36,7 @@ class MHD:
         self.__S      = S
         self.__P      = P
         self.__a      = a
+        self.__theta = theta
         self.__gamma  = adiabatic_index
         self.__beta   = beta
         self.__Bguide = Bguide
@@ -67,10 +68,11 @@ class MHD:
         else:
             self.shear = False
 
-        self.kx  = kx * np.cos(theta)
-        self.ky  = kx * np.sin(theta)
-        self.z1  = z1
-        self.z2  = z2
+        self.kv = kx
+        self.kx = kx * np.cos(theta)
+        self.ky = kx * np.sin(theta)
+        self.z1 = z1
+        self.z2 = z2
 
         self.vector_potential = vector_potential
 
@@ -249,6 +251,19 @@ class MHD:
                 self.make_background()
         else:
             print('a must be > 0! Current value a={} is unchanged'.format(self.__a))
+
+    @property
+    def theta(self):
+        return self.__theta
+
+    @theta.setter
+    def theta(self, theta):
+        import numpy as np
+
+        self.__theta = theta
+
+        self.kx = self.kv * np.cos(theta)
+        self.ky = self.kv * np.sin(theta)
 
     @property
     def beta(self):
