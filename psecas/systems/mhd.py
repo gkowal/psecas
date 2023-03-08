@@ -174,11 +174,11 @@ class MHD:
                 eq8 += " -1j*kx*Vx*dBz"
 
         if self.viscous:
-            eq3 += " +nu*Dn*(-4*kx**2*dvx -3*ky**2*dvx +3*dz(dz(dvx))    -kx*ky*dvy  +1j*kx*dz(dvz)))/3" \
+            eq3 += " +nu*Dn*(-4*kx**2*dvx -3*ky**2*dvx +3*dz(dz(dvx))    -kx*ky*dvy  +1j*kx*dz(dvz))/3" \
                   +" +nu*dDndz*(1j*kx*dvz +dz(dvx))"
-            eq4 += " +nu*Dn*(-3*kx**2*dvy -4*ky**2*dvy +3*dz(dz(dvy))    -kx*ky*dvx  +1j*ky*dz(dvz)))/3" \
+            eq4 += " +nu*Dn*(-3*kx**2*dvy -4*ky**2*dvy +3*dz(dz(dvy))    -kx*ky*dvx  +1j*ky*dz(dvz))/3" \
                   +" +nu*dDndz*(1j*ky*dvz +dz(dvy))"
-            eq5 += " +nu*Dn*(-3*kx**2*dvz -3*ky**2*dvz +4*dz(dz(dvy)) +1j*kx*dz(dvx) +1j*ky*dz(dvy)))/3" \
+            eq5 += " +nu*Dn*(-3*kx**2*dvz -3*ky**2*dvz +4*dz(dz(dvy)) +1j*kx*dz(dvx) +1j*ky*dz(dvy))/3" \
                   +" +nu*dDndz*(-2j*kx*dvx -2j*ky*dvy +4*dz(dvz))/3"
             if self.shear:
                 eq2 += "+gmm1*nu*((dDndz*dVxdz +Dn*d2Vxdz)*dvx +Vx*dVxdz*dz(ddn) +Vx*d2Vxdz*ddn" \
