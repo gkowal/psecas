@@ -14,7 +14,7 @@ class MHD:
                                default -0.5 and 0.5, respectively)
             adiabatic_index  - the adiabatic index
             S                - the Lundquist number (default 1e5)
-            Pr               - the Prandtl number (default 0)
+            P                - the Prandtl number (default 0)
             beta             - the plasma-beta parameter (default 1)
             a                - the thickness of the current sheet (default 1)
             Bguide           - the guide field (in the Y direction, default 0)
@@ -26,7 +26,7 @@ class MHD:
                                (default 'False')
     """
     def __init__(self, grid, kx, theta=0, z1=-0.5, z2=0.5, a=1, adiabatic_index=5/3, \
-                    S=1e4, Pr=0, beta=1, Bguide=0, Vshear=0, \
+                    S=1e4, P=0, beta=1, Bguide=0, Vshear=0, \
                     problem='tearing', periodic=True, vector_potential=False):
         import numpy as np
 
@@ -34,7 +34,7 @@ class MHD:
         self.periodic = periodic
 
         self.__S      = S
-        self.__Pr     = Pr
+        self.__P      = P
         self.__a      = a
         self.__gamma  = adiabatic_index
         self.__beta   = beta
@@ -48,8 +48,8 @@ class MHD:
             self.eta       = 0
             self.resistive = False
 
-        if Pr > 0 and S > 0:
-            self.nu = Pr/S
+        if P > 0 and S > 0:
+            self.nu = P/S
             self.viscous = True
         else:
             self.nu = 0
@@ -129,8 +129,8 @@ class MHD:
         # Equations (Careful! No space behind minus)
         eq1 = "sigma*ddn    = -dDndz*dvz" \
                            +"    -Dn*(1j*kx*dvx +1j*ky*dvy +dz(dvz))"
-        eq2 = "sigma*dpr    = -dprdz*dvz" \
-                           +" -gm*pr*(1j*kx*dvx +1j*ky*dvy +dz(dvz))"
+        eq2 = "sigma*dpr    = -dPrdz*dvz" \
+                           +" -gm*Pr*(1j*kx*dvx +1j*ky*dvy +dz(dvz))"
         eq3 = "sigma*dvx*Dn = -1j*kx*dpr"
         eq4 = "sigma*dvy*Dn = -1j*ky*dpr"
         eq5 = "sigma*dvz*Dn = -dz(dpr)"
@@ -159,13 +159,33 @@ class MHD:
                             +" -dBydz*dvz -By*dz(dvz)"
             eq8 = "sigma*dBz = +1j*kx*Bx*dvz +1j*ky*By*dvz"
 
+        if self.shear:
+            eq1 += " -1j*kx*Vx*ddn"
+            eq2 += " -1j*kx*Vx*dpr"
+            eq3 += " -1j*kx*Dn*Vx*dvx -Dn*dVxdz*dvz"
+            eq4 += " -1j*kx*Dn*Vx*dvy"
+            eq5 += " -1j*kx*Dn*Vx*dvz"
+            if vector_potential:
+                eq7 += " -1j*kx*Vx*dAy"
+                eq8 += " +Vx*(-1j*kx*dAz +dz(dAz))"
+            else:
+                eq6 += " +1j*ky*Vx*dBy +dVxdz*dBz +Vx*dz(dBz)"
+                eq7 += " -1j*kx*Vx*dBy"
+                eq8 += " -1j*kx*Vx*dBz"
+
         if self.viscous:
-            eq3 += " +nu*(dDndz*(1j*kx*dvz +dz(dvx))" \
-                 +" -4*kx**2*dvx/3  -ky**2*dvy    +dz(dz(dvx))       -kx*ky*dvy/3 +1j*kx*dz(dvz)/3)"
-            eq4 += " +nu*(dDndz*(1j*ky*dvz +dz(dvy))" \
-                 +"   -kx**2*dvy  -4*ky**2*dvy/3  +dz(dz(dvy))       -kx*ky*dvx/3 +1j*ky*dz(dvz)/3)"
-            eq5 += " +nu*(-2*dDndz*(1j*kx*dvx +1j*ky*dvy -2*dz(dvz))/3" \
-                 +"   -kx**2*dvz    -ky**2*dvz  +4*dz(dz(dvz))/3 +1j*kx*dz(dvx)/3 +1j*ky*dz(dvy)/3)"
+            eq3 += " +nu*Dn*(-4*kx**2*dvx -3*ky**2*dvx +3*dz(dz(dvx))    -kx*ky*dvy  +1j*kx*dz(dvz)))/3" \
+                  +" +nu*dDndz*(1j*kx*dvz +dz(dvx))"
+            eq4 += " +nu*Dn*(-3*kx**2*dvy -4*ky**2*dvy +3*dz(dz(dvy))    -kx*ky*dvx  +1j*ky*dz(dvz)))/3" \
+                  +" +nu*dDndz*(1j*ky*dvz +dz(dvy))"
+            eq5 += " +nu*Dn*(-3*kx**2*dvz -3*ky**2*dvz +4*dz(dz(dvy)) +1j*kx*dz(dvx) +1j*ky*dz(dvy)))/3" \
+                  +" +nu*dDndz*(-2j*kx*dvx -2j*ky*dvy +4*dz(dvz))/3"
+            if self.shear:
+                eq2 += "+gmm1*nu*((dDndz*dVxdz +Dn*d2Vxdz)*dvx +Vx*dVxdz*dz(ddn) +Vx*d2Vxdz*ddn" \
+                      +" +Vx*dDndz*(1j*kx*dvz +dz(dvx))" \
+                      +" +Dn*Vx*(-4*kx**2*dvx -3*ky**2*dvx +3*dz(dz(dvx)) -kx*ky*dvy +1j*kx*dz(dvz))/3)"
+                eq3 += " +nu*(dVxdz*dz(ddn) +d2Vxdz*ddn)"
+                eq5 += " +nu*1j*kx*dVxdz*ddn"
 
         if self.resistive:
             if vector_potential:
@@ -181,20 +201,6 @@ class MHD:
                 eq7 += " +eta*(-kx**2*dBy -ky**2*dBy +dz(dz(dBy)))"
                 eq8 += " +eta*(-kx**2*dBz -ky**2*dBz +dz(dz(dBz)))"
 
-        if self.shear:
-            eq1 += " -1j*kx*Vx*ddn"
-            eq2 += " -1j*kx*Vx*dpr"
-            eq3 += " -1j*kx*Dn*Vx*dvx -Dn*dVxdz*dvx"
-            eq4 += " -1j*kx*Dn*Vx*dvy"
-            eq5 += " -1j*kx*Dn*Vx*dvz"
-            if vector_potential:
-                eq7 += " -1j*kx*Vx*dAy"
-                eq8 += " +Vx*(-1j*kx*dAz +dz(dAz))"
-            else:
-                eq6 += " -1j*ky*Vx*dBy -dVxdz*dBz -Vx*dz(dBz)"
-                eq7 += " +1j*kx*Vx*dBy"
-                eq8 += " +1j*kx*Vx*dBz"
-
         self.equations = [eq1, eq2, eq3, eq4, eq5, eq6, eq7, eq8]
 
     @property
@@ -207,7 +213,7 @@ class MHD:
             self.resistive = True
             self.__S = S
             self.eta = 1/S
-            self.nu  = self.__Pr/S
+            self.nu  = self.__P/S
         else:
             self.resistive = False
             self.__S = 0
@@ -216,20 +222,20 @@ class MHD:
         self.make_background()
 
     @property
-    def Pr(self):
-        return self.__Pr
+    def P(self):
+        return self.__P
 
-    @Pr.setter
-    def Pr(self, Pr):
-        if Pr > 0 and self.__S > 0:
+    @P.setter
+    def P(self, P):
+        if P > 0 and self.__S > 0:
             self.viscous = True
-            self.__Pr = Pr
-            self.nu   = Pr/self.__S
+            self.__P = P
+            self.nu   = P/self.__S
             self.make_background()
         else:
             self.viscous = True
-            self.__Pr = 0
-            self.nu   = 0
+            self.__P = 0
+            self.nu  = 0
             self.make_background()
 
     @property
@@ -316,13 +322,14 @@ class MHD:
 
             if self.periodic:
                 Dn_sym = 1
-                pr_sym = (1 + beta) / 2 - (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)**2 / 2
+                Pr_sym = (1 + beta) / 2 - (tanh((z - z1) / a) \
+                                         - tanh((z - z2) / a) - 1)**2 / 2
                 Vx_sym = Vs * (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)
                 Bx_sym =      (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)
                 By_sym = Bg
             else:
                 Dn_sym = 1
-                pr_sym = (1 + beta) / 2 - tanh(z / a)**2 / 2
+                Pr_sym = (1 + beta) / 2 - tanh(z / a)**2 / 2
                 Vx_sym = Vs * tanh(z / a)
                 Bx_sym =      tanh(z / a)
                 By_sym = Bg
@@ -334,28 +341,19 @@ class MHD:
             By_sym = Bg
 
         dDndz_sym  = diff(Dn_sym, z)
-        d2Dndz_sym = diff(dDndz_sym, z)
-        dprdz_sym  = diff(pr_sym, z)
-        d2prdz_sym = diff(dprdz_sym, z)
+        dPrdz_sym  = diff(Pr_sym, z)
         dVxdz_sym  = diff(Vx_sym, z)
-        d2Vxdz_sym = diff(dVxdz_sym, z)
         dBxdz_sym  = diff(Bx_sym, z)
-        d2Bxdz_sym = diff(dBxdz_sym, z)
         dBydz_sym  = diff(By_sym, z)
-        d2Bydz_sym = diff(dBydz_sym, z)
 
         self.Dn     = lambdify(z, Dn_sym)(zg)
         self.dDndz  = lambdify(z, dDndz_sym)(zg)
-        self.d2Dndz = lambdify(z, d2Dndz_sym)(zg)
-        self.pr     = lambdify(z, pr_sym)(zg)
-        self.dprdz  = lambdify(z, dprdz_sym)(zg)
-        self.d2prdz = lambdify(z, d2prdz_sym)(zg)
+        self.Pr     = lambdify(z, Pr_sym)(zg)
+        self.dPrdz  = lambdify(z, dPrdz_sym)(zg)
         self.Vx     = lambdify(z, Vx_sym)(zg)
         self.dVxdz  = lambdify(z, dVxdz_sym)(zg)
         self.d2Vxdz = lambdify(z, d2Vxdz_sym)(zg)
         self.Bx     = lambdify(z, Bx_sym)(zg)
         self.dBxdz  = lambdify(z, dBxdz_sym)(zg)
-        self.d2Bxdz = lambdify(z, d2Bxdz_sym)(zg)
         self.By     = lambdify(z, By_sym)(zg)
         self.dBydz  = lambdify(z, dBydz_sym)(zg)
-        self.d2Bydz = lambdify(z, d2Bydz_sym)(zg)
