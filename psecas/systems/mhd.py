@@ -343,6 +343,7 @@ class MHD:
         dDndz_sym  = diff(Dn_sym, z)
         dPrdz_sym  = diff(Pr_sym, z)
         dVxdz_sym  = diff(Vx_sym, z)
+        d2Vxdz_sym = diff(dVxdz_sym, z)
         dBxdz_sym  = diff(Bx_sym, z)
         dBydz_sym  = diff(By_sym, z)
 
