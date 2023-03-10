@@ -26,7 +26,7 @@ class MHD:
                                (default 'False')
     """
     def __init__(self, grid, kx, theta=0, z1=-0.5, z2=0.5, a=1, adiabatic_index=5/3, \
-                    S=1e4, P=0, beta=1, Bguide=0, Vshear=0, \
+                    S=1e4, P=0, beta=1, Bguide=0, Vshear=0, Vangle=0, \
                     problem='tearing', periodic=True, vector_potential=False):
         import numpy as np
 
@@ -41,6 +41,7 @@ class MHD:
         self.__beta   = beta
         self.__Bguide = Bguide
         self.__Vshear = Vshear
+        self.__Vangle = Vangle
 
         if S > 0:
             self.eta       = 1/S
@@ -138,13 +139,13 @@ class MHD:
         eq5 = "sigma*dvz*Dn = -dz(dpr)"
 
         if vector_potential:
-            eq3 += " +1j*dBxdz*(kx*dAy -ky*dAx)" \
+            eq3 += " +dBxdz*(1j*kx*dAy -1j*ky*dAx)" \
                   +" -By*(kx**2*dAz +ky**2*dAz +1j*kx*dz(dAx) +1j*ky*dz(dAy))"
-            eq4 += " +1j*dBydz*(kx*dAy -ky*dAx)" \
+            eq4 += " +dBydz*(1j*kx*dAy -1j*ky*dAx)" \
                   +" +Bx*(kx**2*dAz +ky**2*dAz +1j*kx*dz(dAx) +1j*ky*dz(dAy))"
-            eq5 += " -dBydz*(dz(dAx) -1j*kx*dAz) -dBxdz*(1j*ky*dAz -dz(dAy))" \
-                  +" +Bx*(-kx**2*dAy +kx*ky*dAx -1j*ky*dz(dAz) +dz(dz(dAy)))" \
-                  +" +By*(-kx*ky*dAy +ky**2*dAx +1j*kx*dz(dAz) -dz(dz(dAx)))"
+            eq5 += " -dBxdz*(1j*ky*dAz -dz(dAy)) +dBydz*(1j*kx*dAz -dz(dAx))" \
+                  +" -Bx*(+kx**2*dAy -kx*ky*dAx +1j*ky*dz(dAz) -dz(dz(dAy)))" \
+                  +" +By*(+ky**2*dAx -kx*ky*dAy +1j*kx*dz(dAz) -dz(dz(dAx)))"
             eq6 = "sigma*dAx = -By*dvz"
             eq7 = "sigma*dAy = +Bx*dvz"
             eq8 = "sigma*dAz = -Bx*dvy +By*dvx"
@@ -155,44 +156,45 @@ class MHD:
             eq5 += " -dBydz*dBy -dBxdz*dBx" \
                   +" +Bx*(1j*kx*dBz -dz(dBx))" \
                   +" +By*(1j*ky*dBz -dz(dBy))"
-            eq6 = "sigma*dBx = +1j*ky*(By*dvx -Bx*dvy)" \
-                            +" -dBxdz*dvz -Bx*dz(dvz)"
-            eq7 = "sigma*dBy = -1j*kx*(By*dvx -Bx*dvy)" \
-                            +" -dBydz*dvz -By*dz(dvz)"
+            eq6 = "sigma*dBx = -Bx*(1j*ky*dvy +dz(dvz)) -dBxdz*dvz +1j*ky*By*dvx"
+            eq7 = "sigma*dBy = -By*(1j*kx*dvx +dz(dvz)) -dBydz*dvz +1j*kx*Bx*dvy"
             eq8 = "sigma*dBz = +1j*kx*Bx*dvz +1j*ky*By*dvz"
 
         if self.shear:
-            eq1 += " -1j*kx*Vx*ddn"
-            eq2 += " -1j*kx*Vx*dpr"
-            eq3 += " -1j*kx*Dn*Vx*dvx -Dn*dVxdz*dvz"
-            eq4 += " -1j*kx*Dn*Vx*dvy"
-            eq5 += " -1j*kx*Dn*Vx*dvz"
+            eq1 += " -1j*kx*Vx*ddn -1j*ky*Vy*ddn"
+            eq2 += " -1j*kx*Vx*dpr -1j*ky*Vy*dpr"
+            eq3 += " -1j*kx*Dn*Vx*dvx -1j*ky*Dn*Vy*dvx -Dn*dVxdz*dvz"
+            eq4 += " -1j*kx*Dn*Vx*dvy -1j*ky*Dn*Vy*dvy -Dn*dVydz*dvz"
+            eq5 += " -1j*kx*Dn*Vx*dvz -1j*ky*Dn*Vy*dvz"
             if vector_potential:
-                eq7 += " -1j*kx*Vx*dAy"
-                eq8 += " +Vx*(-1j*kx*dAz +dz(dAz))"
+                eq6 += " +Vy*(1j*kx*dAy -1j*ky*dAx)"
+                eq7 += " -Vx*(1j*kx*dAy -1j*ky*dAx)"
+                eq8 += " -Vx*(1j*kx*dAz -dz(dAz)) -Vy*(1j*ky*dAz -dz(dAy))"
             else:
-                eq6 += " +1j*ky*Vx*dBy +dVxdz*dBz +Vx*dz(dBz)"
-                eq7 += " -1j*kx*Vx*dBy"
-                eq8 += " -1j*kx*Vx*dBz"
+                eq6 += " +Vx*(1j*ky*dBy +dz(dBz)) +dVxdz*dBz -1j*ky*Vy*dBx"
+                eq7 += " +Vy*(1j*kx*dBx +dz(dBz)) +dVydz*dBz -1j*kx*Vx*dBy"
+                eq8 += " -1j*kx*Vx*dBz -1j*ky*Vy*dBz"
 
         if self.viscous:
-            eq3 += " +nu*Dn*(-4*kx**2*dvx -3*ky**2*dvx +3*dz(dz(dvx))    -kx*ky*dvy  +1j*kx*dz(dvz))/3" \
-                  +" +nu*dDndz*(1j*kx*dvz +dz(dvx))"
-            eq4 += " +nu*Dn*(-3*kx**2*dvy -4*ky**2*dvy +3*dz(dz(dvy))    -kx*ky*dvx  +1j*ky*dz(dvz))/3" \
-                  +" +nu*dDndz*(1j*ky*dvz +dz(dvy))"
-            eq5 += " +nu*Dn*(-3*kx**2*dvz -3*ky**2*dvz +4*dz(dz(dvy)) +1j*kx*dz(dvx) +1j*ky*dz(dvy))/3" \
-                  +" +nu*dDndz*(-2j*kx*dvx -2j*ky*dvy +4*dz(dvz))/3"
+            eq3 += " +nu*(dDndz*(1j*kx*dvz +dz(dvx))" \
+                  +" +Dn*((-4*kx**2*dvx -kx*ky*dvy +1j*kx*dz(dvz))/3 -ky**2*dvx +dz(dz(dvx))))"
+            eq4 += " +nu*(dDndz*(1j*ky*dvz +dz(dvy))" \
+                  +" +Dn*((-4*ky**2*dvy -kx*ky*dvx +1j*ky*dz(dvz))/3 -kx**2*dvy +dz(dz(dvy))))"
+            eq5 += " +nu*(dDndz*(-2j*kx*dvx -2j*ky*dvy +4*dz(dvz))/3" \
+                  +" +Dn*((4*dz(dz(dvz)) +1j*kx*dz(dvx) +1j*ky*dz(dvy))/3 -kx**2*dvz -ky**2*dvz))"
             if self.shear:
-                eq2 += "+gmm1*nu*((dDndz*dVxdz +Dn*d2Vxdz)*dvx +Vx*dVxdz*dz(ddn) +Vx*d2Vxdz*ddn" \
-                      +" +Vx*dDndz*(1j*kx*dvz +dz(dvx))" \
-                      +" +Dn*Vx*(-4*kx**2*dvx -3*ky**2*dvx +3*dz(dz(dvx)) -kx*ky*dvy +1j*kx*dz(dvz))/3)"
+                eq2 += " +gmm1*nu*((Vx*dVxdz +Vy*dVydz)*dz(ddn) +(Vx*d2Vxdz + Vy*d2Vydz)*ddn" \
+                      +" +dDndz*(dVxdz*dvx +dVydz*dvy) +Dn*(d2Vxdz*dvx +d2Vydz*dvy)" \
+                      +" +Vx*(dDndz*(1j*kx*dvz +dz(dvx)) +Dn*(1j*kx*dz(dvz)/3 -kx*ky*dvy/3 -ky**2*dvx +dz(dz(dvx)) -4*kx**2*dvx/3))" \
+                      +" +Vy*(dDndz*(1j*ky*dvz +dz(dvy)) +Dn*(1j*ky*dz(dvz)/3 -kx*ky*dvx/3 -ky**2*dvy +dz(dz(dvy)) -4*ky**2*dvy/3)))"
                 eq3 += " +nu*(dVxdz*dz(ddn) +d2Vxdz*ddn)"
-                eq5 += " +nu*1j*kx*dVxdz*ddn"
+                eq4 += " +nu*(dVydz*dz(ddn) +d2Vydz*ddn)"
+                eq5 += " +nu*(1j*kx*dVxdz +1j*ky*dVydz)*ddn"
 
         if self.resistive:
             if vector_potential:
-                eq2 += " -2*gmm1*eta*(dBxdz*(-kx**2*dAy +kx*ky*dAx -1j*ky*dz(dAz) +dz(dz(dAy)))" \
-                                  +" +dBydz*(-kx*ky*dAy +ky**2*dAx +1j*kx*dz(dAz) -dz(dz(dAx))))"
+                eq2 += " +2*gmm1*eta*(dBxdz*(kx**2*dAy +ky**2*dAy -dz(dz(dAy)))" \
+                                  +" -dBydz*(kx**2*dAx +ky**2*dAx -dz(dz(dAx))))"
                 eq6 += " +eta*(-kx**2*dAx -ky**2*dAx +dz(dz(dAx)))"
                 eq7 += " +eta*(-kx**2*dAy -ky**2*dAy +dz(dz(dAy)))"
                 eq8 += " +eta*(-kx**2*dAz -ky**2*dAz +dz(dz(dAz)))"
@@ -310,6 +312,15 @@ class MHD:
         self.make_background()
 
     @property
+    def Vangle(self):
+        return self.__Vangle
+
+    @Vangle.setter
+    def Vangle(self, Vangle):
+        self.__Vangle = Vangle
+        self.make_background()
+
+    @property
     def Bguide(self):
         return self.__Bguide
 
@@ -319,6 +330,7 @@ class MHD:
         self.make_background()
 
     def make_background(self):
+        import numpy as np
         from sympy import tanh, diff, lambdify, symbols
 
         z    = symbols("z")
@@ -333,19 +345,22 @@ class MHD:
 
         if self.problem == 'tearing':
             a  = self.__a
-            Vs = self.__Vshear
+            Vs = self.__Vshear * np.cos(self.__Vangle)
+            Vg = self.__Vshear * np.sin(self.__Vangle)
 
             if self.periodic:
                 Dn_sym = 1
                 Pr_sym = (1 + beta) / 2 - (tanh((z - z1) / a) \
                                          - tanh((z - z2) / a) - 1)**2 / 2
                 Vx_sym = Vs * (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)
+                Vy_sym = Vg * (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)
                 Bx_sym =      (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)
                 By_sym = Bg
             else:
                 Dn_sym = 1
                 Pr_sym = (1 + beta) / 2 - tanh(z / a)**2 / 2
                 Vx_sym = Vs * tanh(z / a)
+                Vy_sym = Vg * tanh(z / a)
                 Bx_sym =      tanh(z / a)
                 By_sym = Bg
         else:
@@ -359,6 +374,8 @@ class MHD:
         dPrdz_sym  = diff(Pr_sym, z)
         dVxdz_sym  = diff(Vx_sym, z)
         d2Vxdz_sym = diff(dVxdz_sym, z)
+        dVydz_sym  = diff(Vy_sym, z)
+        d2Vydz_sym = diff(dVydz_sym, z)
         dBxdz_sym  = diff(Bx_sym, z)
         dBydz_sym  = diff(By_sym, z)
 
@@ -369,6 +386,9 @@ class MHD:
         self.Vx     = lambdify(z, Vx_sym)(zg)
         self.dVxdz  = lambdify(z, dVxdz_sym)(zg)
         self.d2Vxdz = lambdify(z, d2Vxdz_sym)(zg)
+        self.Vy     = lambdify(z, Vy_sym)(zg)
+        self.dVydz  = lambdify(z, dVydz_sym)(zg)
+        self.d2Vydz = lambdify(z, d2Vydz_sym)(zg)
         self.Bx     = lambdify(z, Bx_sym)(zg)
         self.dBxdz  = lambdify(z, dBxdz_sym)(zg)
         self.By     = lambdify(z, By_sym)(zg)
