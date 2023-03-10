@@ -17,16 +17,20 @@ class MHD:
             P                - the Prandtl number (default 0)
             beta             - the plasma-beta parameter (default 1)
             a                - the thickness of the current sheet (default 1)
+            Bshear           - the strength of the sheared magnetic field component
+                               (in the X direction, default 1)
             Bguide           - the guide field (in the Y direction, default 0)
             Vshear           - the amplitude of the velocity shear along the X direction
                                (default 0)
+            Vangle           - the angle in radians between the direction of the velocity
+                               shear and the X axis in the XY plane (default 0)
             problem          - the equilibrium configuration for the selected problem
                                (only 'tearing' implemented so far)
             vector_potential - use the magnetic vector potential to express the magnetic field
                                (default 'False')
     """
     def __init__(self, grid, kx, theta=0, z1=-0.5, z2=0.5, a=1, adiabatic_index=5/3, \
-                    S=1e4, P=0, beta=1, Bguide=0, Vshear=0, Vangle=0, \
+                    S=1e4, P=0, beta=1, Bshear=1, Bguide=0, Vshear=0, Vangle=0, \
                     problem='tearing', periodic=True, vector_potential=False):
         import numpy as np
 
@@ -39,6 +43,7 @@ class MHD:
         self.__theta = theta
         self.__gamma  = adiabatic_index
         self.__beta   = beta
+        self.__Bshear = Bshear
         self.__Bguide = Bguide
         self.__Vshear = Vshear
         self.__Vangle = Vangle
@@ -298,6 +303,24 @@ class MHD:
             self.gmm1      = 0
 
     @property
+    def Bshear(self):
+        return self.__Bshear
+
+    @Bshear.setter
+    def Bshear(self, Bshear):
+        self.__Bshear = Bshear
+        self.make_background()
+
+    @property
+    def Bguide(self):
+        return self.__Bguide
+
+    @Bguide.setter
+    def Bguide(self, Bguide):
+        self.__Bguide = Bguide
+        self.make_background()
+
+    @property
     def Vshear(self):
         return self.__Vshear
 
@@ -320,15 +343,6 @@ class MHD:
         self.__Vangle = Vangle
         self.make_background()
 
-    @property
-    def Bguide(self):
-        return self.__Bguide
-
-    @Bguide.setter
-    def Bguide(self, Bguide):
-        self.__Bguide = Bguide
-        self.make_background()
-
     def make_background(self):
         import numpy as np
         from sympy import tanh, diff, lambdify, symbols
@@ -342,6 +356,7 @@ class MHD:
 
         beta = self.__beta
         Bg   = self.__Bguide
+        Bs   = self.__Bshear
 
         if self.problem == 'tearing':
             a  = self.__a
@@ -354,14 +369,14 @@ class MHD:
                                          - tanh((z - z2) / a) - 1)**2 / 2
                 Vx_sym = Vs * (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)
                 Vy_sym = Vg * (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)
-                Bx_sym =      (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)
+                Bx_sym = Bs * (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)
                 By_sym = Bg
             else:
                 Dn_sym = 1
                 Pr_sym = (1 + beta) / 2 - tanh(z / a)**2 / 2
                 Vx_sym = Vs * tanh(z / a)
                 Vy_sym = Vg * tanh(z / a)
-                Bx_sym =      tanh(z / a)
+                Bx_sym = Bs * tanh(z / a)
                 By_sym = Bg
         else:
             Dn_sym = 1
