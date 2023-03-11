@@ -16,6 +16,10 @@ class MHD:
             S                - the Lundquist number (default 1e5)
             P                - the Prandtl number (default 0)
             beta             - the plasma-beta parameter (default 1)
+            zeta             - the balance between thermal and magnetic pressure to guarantee
+                               uniform total pressure; 0 means the total pressure is completely
+                               balanced by thermal pressure, 1 by the y magnetic field component
+                               (default 0)
             a                - the thickness of the current sheet (default 1)
             Bshear           - the strength of the sheared magnetic field component
                                (in the X direction, default 1)
@@ -30,7 +34,7 @@ class MHD:
                                (default 'False')
     """
     def __init__(self, grid, kx, theta=0, z1=-0.5, z2=0.5, a=1, adiabatic_index=5/3, \
-                    S=1e4, P=0, beta=1, Bshear=1, Bguide=0, Vshear=0, Vangle=0, \
+                    S=1e4, P=0, beta=1, zeta=0, Bshear=1, Bguide=0, Vshear=0, Vangle=0, \
                     problem='tearing', periodic=True, vector_potential=False):
         import numpy as np
 
@@ -79,6 +83,8 @@ class MHD:
         self.ky = kx * np.sin(theta)
         self.z1 = z1
         self.z2 = z2
+
+        self.zeta = zeta
 
         self.vector_potential = vector_potential
 
@@ -345,7 +351,7 @@ class MHD:
 
     def make_background(self):
         import numpy as np
-        from sympy import tanh, diff, lambdify, symbols
+        from sympy import sqrt, tanh, diff, lambdify, symbols
 
         z    = symbols("z")
 
@@ -354,29 +360,48 @@ class MHD:
         z1   = self.z1
         z2   = self.z2
 
+        zeta = self.zeta
+
+        a    = self.__a
         beta = self.__beta
         Bg   = self.__Bguide
         Bs   = self.__Bshear
+        Vs   = self.__Vshear * np.cos(self.__Vangle)
+        Vg   = self.__Vshear * np.sin(self.__Vangle)
 
-        if self.problem == 'tearing':
-            a  = self.__a
-            Vs = self.__Vshear * np.cos(self.__Vangle)
-            Vg = self.__Vshear * np.sin(self.__Vangle)
-
+        if self.problem == 'TR' or self.problem == 'tearing':
+            pmag = Bs**2 / 2
             if self.periodic:
                 Dn_sym = 1
-                Pr_sym = (1 + beta) / 2 - (tanh((z - z1) / a) \
-                                         - tanh((z - z2) / a) - 1)**2 / 2
+                Pr_sym = pmag * ((1 + beta) - (tanh((z - z1) / a) \
+                                             - tanh((z - z2) / a) - 1)**2)
                 Vx_sym = Vs * (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)
                 Vy_sym = Vg * (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)
                 Bx_sym = Bs * (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)
                 By_sym = Bg
             else:
                 Dn_sym = 1
-                Pr_sym = (1 + beta) / 2 - tanh(z / a)**2 / 2
+                Pr_sym = pmag * (beta + (1 - zeta)*(1 - tanh(z / a)**2))
                 Vx_sym = Vs * tanh(z / a)
                 Vy_sym = Vg * tanh(z / a)
                 Bx_sym = Bs * tanh(z / a)
+                By_sym = sqrt(Bg**2 + zeta*Bs**2*(1 - tanh(z / a)**2))
+                # By_sym = Bg
+        elif self.problem == 'KH' or self.problem == 'kelvin-helmholtz':
+            pmag = (Bs**2 + Bg**2) / 2
+            if self.periodic:
+                Dn_sym = 1
+                Pr_sym = (1 + beta) * pmag
+                Vx_sym = Vs * (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)
+                Vy_sym = Vg * (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)
+                Bx_sym = Bs
+                By_sym = Bg
+            else:
+                Dn_sym = 1 + tanh(z / a) / 2
+                Pr_sym = (1 + beta) * pmag
+                Vx_sym = Vs * tanh(z / a)
+                Vy_sym = Vg * tanh(z / a)
+                Bx_sym = Bs
                 By_sym = Bg
         else:
             Dn_sym = 1
