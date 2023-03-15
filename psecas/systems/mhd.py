@@ -34,7 +34,7 @@ class MHD:
                                (default 'False')
     """
     def __init__(self, grid, kx, theta=0, z1=-0.5, z2=0.5, a=1, adiabatic_index=5/3, \
-                    S=1e4, P=0, beta=1, zeta=0, Bshear=1, Bguide=0, Vshear=0, Vangle=0, \
+                    S=1e4, P=0, beta=1, zeta=0, Bshear=1, Bguide=0, Btrans=0, Vshear=0, Vangle=0, \
                     problem='tearing', periodic=True, vector_potential=False):
         import numpy as np
 
@@ -49,6 +49,7 @@ class MHD:
         self.__beta   = beta
         self.__Bshear = Bshear
         self.__Bguide = Bguide
+        self.__Btrans = Btrans
         self.__Vshear = Vshear
         self.__Vangle = Vangle
 
@@ -165,14 +166,14 @@ class MHD:
             eq7 = "sigma*dAy = +Bx*dvz"
             eq8 = "sigma*dAz = -Bx*dvy +By*dvx"
         else:
-            eq3 += " +dBxdz*dBz -1j*By*(kx*dBy -ky*dBx)"
-            eq4 += " +dBydz*dBz +1j*Bx*(kx*dBy -ky*dBx)"
+            eq3 += " +dBxdz*dBz -1j*By*(kx*dBy -ky*dBx) -Bz*(1j*kx*dBz -dz(dBx))"
+            eq4 += " +dBydz*dBz +1j*Bx*(kx*dBy -ky*dBx) -Bz*(1j*ky*dBz -dz(dBy))"
             eq5 += " -dBxdz*dBx -dBydz*dBy" \
                 +" +Bx*(1j*kx*dBz -dz(dBx))" \
                 +" +By*(1j*ky*dBz -dz(dBy))"
-            eq6 = "sigma*dBx = -Bx*(1j*ky*dvy +dz(dvz)) -dBxdz*dvz +1j*ky*By*dvx"
-            eq7 = "sigma*dBy = -By*(1j*kx*dvx +dz(dvz)) -dBydz*dvz +1j*kx*Bx*dvy"
-            eq8 = "sigma*dBz = +1j*kx*Bx*dvz +1j*ky*By*dvz"
+            eq6 = "sigma*dBx = -Bx*(1j*ky*dvy +dz(dvz)) -dBxdz*dvz +1j*ky*By*dvx +Bz*dz(dvx)"
+            eq7 = "sigma*dBy = -By*(1j*kx*dvx +dz(dvz)) -dBydz*dvz +1j*kx*Bx*dvy +Bz*dz(dvy)"
+            eq8 = "sigma*dBz = -Bz*(1j*kx*dvx +1j*ky*dvy) +1j*kx*Bx*dvz +1j*ky*By*dvz"
 
         if self.shear:
             eq1 += " -1j*kx*Vx*ddn -1j*ky*Vy*ddn"
@@ -341,6 +342,15 @@ class MHD:
         self.make_background()
 
     @property
+    def Btrans(self):
+        return self.__Btrans
+
+    @Btrans.setter
+    def Btrans(self, Bguide):
+        self.__Btrans = Btrans
+        self.make_background()
+
+    @property
     def Vshear(self):
         return self.__Vshear
 
@@ -381,6 +391,7 @@ class MHD:
         beta = self.__beta
         Bg   = self.__Bguide
         Bs   = self.__Bshear
+        Bn   = self.__Btrans
         Vs   = self.__Vshear * np.cos(self.__Vangle)
         Vg   = self.__Vshear * np.sin(self.__Vangle)
 
@@ -399,6 +410,7 @@ class MHD:
                 Bx_sym = Bs * (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)
                 By_sym = sqrt(Bg**2 + zeta * Bs**2 * (1 / cosh((z - z1) / a)**2 \
                                                     + 1 / cosh((z - z1) / a)**2))
+                Bz_sym = Bn
             else:
                 if self.adiabatic:
                     Dn_sym = 1
@@ -409,6 +421,7 @@ class MHD:
                 Vy_sym = Vg * tanh(z / a)
                 Bx_sym = Bs * tanh(z / a)
                 By_sym = sqrt(Bg**2 + zeta * Bs**2 / cosh(z / a)**2)
+                Bz_sym = Bn
         elif self.problem == 'KH' or self.problem == 'kelvin-helmholtz':
             pmag = (Bs**2 + Bg**2) / 2
             if self.periodic:
@@ -418,6 +431,7 @@ class MHD:
                 Vy_sym = Vg * (tanh((z - z1) / a) - tanh((z - z2) / a) - 1)
                 Bx_sym = Bs
                 By_sym = Bg
+                Bz_sym = Bn
             else:
                 Dn_sym = 1 + tanh(z / a) / 2
                 Pr_sym = (1 + beta) * pmag
@@ -425,12 +439,14 @@ class MHD:
                 Vy_sym = Vg * tanh(z / a)
                 Bx_sym = Bs
                 By_sym = Bg
+                Bz_sym = Bn
         else:
             Dn_sym = 1
             pr_sym = (1 + beta) / 2
             Vx_sym = 0
             Bx_sym = 1
             By_sym = Bg
+            Bz_sym = Bn
 
         dDndz_sym  = diff(Dn_sym, z)
         dVxdz_sym  = diff(Vx_sym, z)
@@ -454,6 +470,7 @@ class MHD:
         self.dBxdz  = lambdify(z, dBxdz_sym)(zg)
         self.By     = lambdify(z, By_sym)(zg)
         self.dBydz  = lambdify(z, dBydz_sym)(zg)
+        self.Bz     = lambdify(z, Bz_sym)(zg)
         if self.adiabatic:
             self.Pr     = lambdify(z, Pr_sym)(zg)
             self.dPrdz  = lambdify(z, dPrdz_sym)(zg)
