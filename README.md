@@ -27,6 +27,8 @@ smooth initial conditions – Linear theory and simulations*,
  - Berlok, T., Quataert, E., Pessah, M. & Pfrommer, C. (2019). *Suppressed heat conductivity in the intracluster medium:
     implications for the magneto-thermal instability*,
  [MNRAS, 504, 3435](https://academic.oup.com/mnras/advance-article/doi/10.1093/mnras/stab832/6179880?guestAccessKey=9dee0390-22b3-47b2-bc46-0276475d749e)
+ - Grzegorz Kowal & Diego A. Falceta-Gonçalves. *Quenching of Tearing Mode Instability by Transverse Magnetic Fields in Reconnection Current Sheets*, [submitted 2024](https://arxiv.org/abs/2407.09996).
+ - Gabriel L. Ferreira-Santos, Grzegorz Kowal & Diego A. Falceta-Gonçalves. *Unveiling a New β-Scaling of the Tearing Instability in Weakly Collisional Plasmas*, [submitted 2025](https://arxiv.org/abs/2503.12702).
 
 If you are here for the Kelvin-Helmholtz instability verification tests presented in Table 2 in the first
 paper, then you can find more information
