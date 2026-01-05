@@ -11,6 +11,7 @@ class Grid:
         self._N = N
         self._zmin = zmin
         self._zmax = zmax
+        self._d = []
         self.make_grid()
 
         # Grid variable name
@@ -35,6 +36,24 @@ class Grid:
     def zmax(self):
         return self._zmax
 
+    @property
+    def d(self):
+        if not self._d:
+            self.build_derivatives(2)
+        return self._d
+
+    @property
+    def d0(self):
+        return self.D(0)
+
+    @property
+    def d1(self):
+        return self.D(1)
+
+    @property
+    def d2(self):
+        return self.D(2)
+
     @N.setter
     def N(self, value):
         self._N = value
@@ -49,6 +68,32 @@ class Grid:
     def zmax(self, value):
         self._zmax = value
         self.make_grid()
+
+    def D(self, k):
+        self.ensure_derivatives(k)
+        return self._d[k]
+
+    def ensure_derivatives(self, k):
+        if not self._d:
+            self.build_derivatives(min(2, k))
+        while len(self._d) <= k:
+            self._d.append(self._d[1] @ self._d[-1])
+
+    def build_derivatives(self, max_order=2):
+        self._d = []
+        self._d.append(self._identity())
+        if max_order >= 1:
+            self._d.append(self._build_d1())
+        if max_order >= 2:
+            self._d.append(self._build_d2() if hasattr(self, "_build_d2")
+                           else self._d[1] @ self._d[1])
+
+    def _identity(self):
+        import numpy as np
+        return np.eye(self.N + 1)
+
+    def _build_d1(self):
+        raise NotImplementedError
 
     def der(self, vec):
         """First derivative of vec defined at zg"""
