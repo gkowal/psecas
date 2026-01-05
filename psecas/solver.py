@@ -389,9 +389,9 @@ class Solver:
 
 
     def _rewrite_derivatives(self, expr, grid, var,
-                              d0_repl="grid.d0.T",
-                              d1_repl="grid.d1.T",
-                              d2_repl="grid.d2.T",
+                              d0_repl="grid.D(0).T",
+                              d1_repl="grid.D(1).T",
+                              d2_repl="grid.D(2).T",
                               dn_repl=None,
                               z_repl="grid.zg"):
         """
@@ -533,7 +533,7 @@ class Solver:
                         if bound == 'Dirichlet':
                             submat[index, index] = 1
                         elif bound == 'Neumann':
-                            submat[index, :] = grid.d1[index, :]
+                            submat[index, :] = grid.D(1)[index, :]
                         else:
                             assert '=' in bound, 'equal sign missing in boundary expression'
                             assert int(bound.split("=")[1]) == 0, 'rhs of boundary expressions must be zero'
@@ -551,8 +551,8 @@ class Solver:
                             bound_t = self._rewrite_derivatives(
                                 bound_t, grid, var,
                                 d0_repl="mask",
-                                d1_repl="grid.d1[{}, :]".format(index),
-                                d2_repl="grid.d2[{}, :]".format(index),
+                                d1_repl="grid.D(1)[{}, :]".format(index),
+                                d2_repl="grid.D(2)[{}, :]".format(index),
                                 dn_repl=lambda n: "grid.D({})[{}, :]".format(n, index),
                                 z_repl="grid.zg[{}]".format(index),
                             )
