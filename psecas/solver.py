@@ -37,6 +37,7 @@ class Solver:
         # Check if we need to solve a generalized evp
         self.check_if_evp_or_gevp(verbose=False)
 
+
     def check_if_evp_or_gevp(self, verbose=False):
         """
         This function determines whether we need to solve a generalized
@@ -387,6 +388,34 @@ class Solver:
         self.mat2 = sparse.bmat(rows, format='csr')
 
 
+    def _rewrite_derivatives(self, expr, grid, var,
+                              d0_repl="grid.d0.T",
+                              d1_repl="grid.d1.T",
+                              d2_repl="grid.d2.T",
+                              z_repl="grid.zg"):
+        """
+        Rewrite derivative syntax in an equation string.
+
+        This helper currently preserves the existing behavior:
+          d{z}(var)           -> d1_repl
+          d{z}(d{z}(var))     -> d2_repl
+          var                 -> d0_repl
+          {z}                 -> z_repl
+
+        It is introduced as a refactoring hook; subsequent commits extend it
+        to support higher-order derivatives and dz(var, n) syntax.
+        """
+        from .string_methods import var_replace
+
+        der = "d" + grid.z + "("
+        expr = expr.replace(der + der + var + "))", d2_repl)
+        expr = expr.replace(der + var + ")", d1_repl)
+        expr = var_replace(expr, var, d0_repl)
+        if z_repl is not None:
+            expr = var_replace(expr, grid.z, z_repl)
+        return expr
+
+
     def _find_submatrices(self, eq, verbose=False):
         import numpy as np
         from scipy import sparse
@@ -412,17 +441,17 @@ class Solver:
                         sub_split = substitution.split('=')
                         eq_t = var_replace(eq_t, sub_split[0].strip(), sub_split[1])
                         print(eq_t)
-                der = "d" + grid.z + "("
-                eq_t = eq_t.replace(der + der + var + "))", "grid.d2.T")
-                eq_t = eq_t.replace(der + var + ")", "grid.d1.T")
-                eq_t = var_replace(eq_t, var, "grid.d0.T")
-                eq_t = var_replace(eq_t, grid.z, "grid.zg")
+                eq_t = self._rewrite_derivatives(eq_t, grid, var)
 
                 variables_t.remove(var)
                 for var2 in variables_t:
-                    eq_t = eq_t.replace(der + der + var2 + "))", "0.0")
-                    eq_t = eq_t.replace(der + var2 + ")", "0.0")
-                    eq_t = var_replace(eq_t, var2, "0.0")
+                    eq_t = self._rewrite_derivatives(
+                        eq_t, grid, var2,
+                        d0_repl="0.0",
+                        d1_repl="0.0",
+                        d2_repl="0.0",
+                        z_repl=None,
+                    )
                 if verbose:
                     print("\nEvaluating expression:", eq_t)
                 try:
@@ -501,13 +530,15 @@ class Solver:
                                     sub_split = substitution.split('=')
                                     bound_t = var_replace(bound_t, sub_split[0].strip(), sub_split[1])
 
-                            der = "d" + grid.z + "("
                             mask = np.zeros(self.grid.NN)
                             mask[index] = 1
-                            bound_t = bound_t.replace(der + der + var + "))", "grid.d2[{}, :]".format(index))
-                            bound_t = bound_t.replace(der + var + ")", "grid.d1[{}, :]".format(index))
-                            bound_t = var_replace(bound_t, var, "mask")
-                            bound_t = var_replace(bound_t, grid.z, "grid.zg[{}]".format(index))
+                            bound_t = self._rewrite_derivatives(
+                                bound_t, grid, var,
+                                d0_repl="mask",
+                                d1_repl="grid.d1[{}, :]".format(index),
+                                d2_repl="grid.d2[{}, :]".format(index),
+                                z_repl="grid.zg[{}]".format(index),
+                            )
                             if verbose:
                                 print("\nEvaluating expression:", bound_t)
                             try:
