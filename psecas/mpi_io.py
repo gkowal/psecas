@@ -136,12 +136,6 @@ class IO:
             self.index_local[i]
         )
         pickle.dump(self.system, open(file, "wb"))
-        # Delete d0, d1 and d2 for storage effieciency
-        system = pickle.load(open(file, "rb"))
-        del system.grid.d0
-        del system.grid.d1
-        del system.grid.d2
-        pickle.dump(system, open(file, "wb"))
 
     def finished(self):
         """Write elapsed time to log file and move the log file to the data

@@ -18,6 +18,54 @@ class Grid:
         # Grid variable name
         self.z = z
 
+    def __getstate__(self):
+        """
+        Exclude potentially large differentiation matrices from serialized state.
+
+        This replaces older IO-side logic that deleted d0/d1/d2 before pickling.
+        With this method, pickle/MPI transfer automatically omits these matrices,
+        and they can be rebuilt later by calling make_grid() or via lazy access.
+        """
+        state = self.__dict__.copy()
+
+        # Newer layout (post-refactor): store all operators in a single list
+        # (e.g. self._d or self.d). Drop/clear it for serialization.
+        if "_d" in state:
+            state["_d"] = []
+        if "d" in state and isinstance(state["d"], list):
+            state["d"] = []
+
+        # Backward compatibility: older grids store d0/d1/d2 directly.
+        # Remove them if present.
+        for key in ("d0", "d1", "d2"):
+            if key in state:
+                try:
+                    del state[key]
+                except Exception:
+                    # Fallback: if deletion fails for any reason, just clear
+                    state[key] = None
+
+        return state
+
+    def __setstate__(self, state):
+        """
+        Restore state from pickle. Differentiation matrices are intentionally
+        absent and will be rebuilt as needed.
+        """
+        self.__dict__.update(state)
+
+        # Ensure the derivative container exists for post-refactor code paths.
+        # (If your refactor uses self._d, keep it consistent here.)
+        if "_d" not in self.__dict__:
+            self.__dict__["_d"] = []
+
+    def _identity(self):
+        import numpy as np
+        return np.eye(self.N + 1)
+
+    def _build_d1(self):
+        raise NotImplementedError
+
     @property
     def L(self):
         return self.zmax - self.zmin
@@ -88,13 +136,6 @@ class Grid:
         if max_order >= 2:
             self._d.append(self._build_d2() if hasattr(self, "_build_d2")
                            else self._d[1] @ self._d[1])
-
-    def _identity(self):
-        import numpy as np
-        return np.eye(self.N + 1)
-
-    def _build_d1(self):
-        raise NotImplementedError
 
     def finalize_derivatives(self, max_derivative_order=None):
         """

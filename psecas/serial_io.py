@@ -19,10 +19,6 @@ def save_system(system, filename):
     """
     import pickle
 
-    # Delete d0, d1 and d2 for storage effieciency
-    del system.grid.d0
-    del system.grid.d1
-    del system.grid.d2
     pickle.dump(system, open(filename, 'wb'))
 
 
