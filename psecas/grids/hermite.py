@@ -25,8 +25,8 @@ class HermiteGrid(Grid):
         assert N <= self.maxN, msg.format(self.maxN)
 
         self._N = N
-
         self._C = C
+        self._d = []
 
         # Grid variable name
         self.z = z
@@ -75,9 +75,7 @@ class HermiteGrid(Grid):
         zg, D = herdif(self.NN, 2, 1 / self.C)
 
         self.zg = zg
-        self.d0 = np.eye(self.NN)
-        self.d1 = D[0]
-        self.d2 = D[1]
+        self._d = [ np.eye(self.NN), D[0], D[1] ]
 
         # Call other objects that depend on the grid
         for callback in self._observers:

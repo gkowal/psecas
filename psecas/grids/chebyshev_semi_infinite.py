@@ -21,8 +21,8 @@ class ChebyshevTLnGrid(Grid):
         self._observers = []
 
         self._N = N
-
         self._C = C
+        self._d = []
 
         # Grid variable name
         self.z = z
@@ -93,9 +93,7 @@ class ChebyshevTLnGrid(Grid):
         # breaks down at high N
         d2 = np.dot(d1, d1)
         self.zg = zg
-        self.d0 = np.eye(N)
-        self.d1 = d1
-        self.d2 = d2
+        self._d = [ np.eye(N), d1, d2 ]
 
         # Call other objects that depend on the grid
         for callback in self._observers:

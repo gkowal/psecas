@@ -23,6 +23,7 @@ class ChebyshevRationalGrid(Grid):
 
         self._N = N
         self._C = C
+        self._d = []
         self.make_grid()
 
         # Grid variable name
@@ -92,9 +93,7 @@ class ChebyshevRationalGrid(Grid):
 
         d2 = np.dot(d1, d1)
         self.zg = zg
-        self.d0 = np.eye(N)
-        self.d1 = d1
-        self.d2 = d2
+        self._d = [ np.eye(N), d1, d2 ]
 
         # Call other objects that depend on the grid
         for callback in self._observers:

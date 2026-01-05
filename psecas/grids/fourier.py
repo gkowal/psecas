@@ -60,9 +60,7 @@ class FourierGrid(Grid):
         )
         d2 = toeplitz(y)
         self.zg = zg * L / (2 * pi) + zmin
-        self.d0 = np.eye(N)
-        self.d1 = d1 / factor
-        self.d2 = d2 / factor ** 2
+        self._d = [ np.eye(N), d1 / factor, d2 / factor ** 2 ]
 
         # Call other objects that depend on the grid
         for callback in self._observers:
