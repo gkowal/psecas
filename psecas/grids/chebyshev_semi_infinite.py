@@ -17,17 +17,17 @@ class ChebyshevTLnGrid(Grid):
     maximum values of the grid depend on both N and C.
     """
 
-    def __init__(self, N, C=1, z="z"):
+    def __init__(self, N, C=1, z="z", max_derivative_order=2):
         self._observers = []
 
         self._N = N
         self._C = C
+        self._max_derivative_order = int(max_derivative_order)
         self._d = []
+        self.make_grid()
 
         # Grid variable name
         self.z = z
-
-        self.make_grid()
 
     def bind_to(self, callback):
         self._observers.append(callback)
@@ -94,6 +94,8 @@ class ChebyshevTLnGrid(Grid):
         d2 = np.dot(d1, d1)
         self.zg = zg
         self._d = [ np.eye(N), d1, d2 ]
+
+        self.finalize_derivatives()
 
         # Call other objects that depend on the grid
         for callback in self._observers:

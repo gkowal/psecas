@@ -17,8 +17,8 @@ class ChebyshevExtremaGrid(Grid):
 
     """
 
-    def __init__(self, N, zmin, zmax, z="z"):
-        super().__init__(N, zmin, zmax, z=z)
+    def __init__(self, N, zmin, zmax, z="z", max_derivative_order=2):
+        super().__init__(N, zmin, zmax, z=z, max_derivative_order=max_derivative_order)
 
     def make_grid(self):
         import numpy as np
@@ -50,6 +50,8 @@ class ChebyshevExtremaGrid(Grid):
         d2 = np.dot(d1, d1)
         self.zg = -(zg - 1) * L / 2 + self.zmin
         self._d = [ np.eye(self.NN), -d1 / factor, d2 / factor ** 2 ]
+
+        self.finalize_derivatives()
 
         # Call other objects that depend on the grid
         for callback in self._observers:

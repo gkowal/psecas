@@ -16,8 +16,8 @@ class FourierGrid(Grid):
 
     """
 
-    def __init__(self, N, zmin, zmax, z="z"):
-        super().__init__(N, zmin, zmax, z=z)
+    def __init__(self, N, zmin, zmax, z="z", max_derivative_order=2):
+        super().__init__(N, zmin, zmax, z=z, max_derivative_order=max_derivative_order)
 
     @property
     def dz(self):
@@ -61,6 +61,8 @@ class FourierGrid(Grid):
         d2 = toeplitz(y)
         self.zg = zg * L / (2 * pi) + zmin
         self._d = [ np.eye(N), d1 / factor, d2 / factor ** 2 ]
+
+        self.finalize_derivatives()
 
         # Call other objects that depend on the grid
         for callback in self._observers:

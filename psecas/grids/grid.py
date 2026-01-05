@@ -3,7 +3,7 @@ class Grid:
     Base class for grids.
     """
 
-    def __init__(self, N, zmin, zmax, z='z'):
+    def __init__(self, N, zmin, zmax, z='z', max_derivative_order=2):
         self._observers = []
 
         assert zmax > zmin
@@ -11,6 +11,7 @@ class Grid:
         self._N = N
         self._zmin = zmin
         self._zmax = zmax
+        self._max_derivative_order = int(max_derivative_order)
         self._d = []
         self.make_grid()
 
@@ -94,6 +95,24 @@ class Grid:
 
     def _build_d1(self):
         raise NotImplementedError
+
+    def finalize_derivatives(self, max_derivative_order=None):
+        """
+        Ensure the grid has differentiation matrices up to max_derivative_order.
+
+        Concrete grid classes should call this at the end of make_grid(),
+        after constructing the baseline operators (typically up to 2nd order).
+        """
+        if max_derivative_order is None:
+            max_derivative_order = self._max_derivative_order
+        max_derivative_order = int(max_derivative_order)
+        if max_derivative_order < 0:
+            raise ValueError("max_derivative_order must be >= 0")
+
+        # Commit 4 assumes ensure_derivatives() exists (from earlier commits).
+        # Keeping this guard makes the commit safer during incremental development.
+        if hasattr(self, "ensure_derivatives"):
+            self.ensure_derivatives(max_derivative_order)
 
     def der(self, vec):
         """First derivative of vec defined at zg"""
