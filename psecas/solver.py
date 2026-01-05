@@ -392,6 +392,7 @@ class Solver:
                               d0_repl="grid.d0.T",
                               d1_repl="grid.d1.T",
                               d2_repl="grid.d2.T",
+                              dn_repl=None,
                               z_repl="grid.zg"):
         """
         Rewrite derivative syntax in an equation string.
@@ -399,15 +400,29 @@ class Solver:
         This helper currently preserves the existing behavior:
           d{z}(var)           -> d1_repl
           d{z}(d{z}(var))     -> d2_repl
+          d{z}(var, n)        -> dn_repl(n)  (defaults to grid.D(n).T)
           var                 -> d0_repl
           {z}                 -> z_repl
 
         It is introduced as a refactoring hook; subsequent commits extend it
         to support higher-order derivatives and dz(var, n) syntax.
         """
+        import re
         from .string_methods import var_replace
 
         der = "d" + grid.z + "("
+
+        # Handle explicit-order derivative: d{z}(var,n)
+        # Strict syntax: no whitespace is permitted.
+        if dn_repl is None:
+            dn_repl = lambda n: "grid.D({}).T".format(n)
+
+        der_func = "d" + grid.z  # e.g. "dz"
+        pat = r"{func}\({var},(\d+)\)".format(
+            func=re.escape(der_func), var=re.escape(var)
+        )
+        expr = re.sub(pat, lambda m: dn_repl(int(m.group(1))), expr)
+
         expr = expr.replace(der + der + var + "))", d2_repl)
         expr = expr.replace(der + var + ")", d1_repl)
         expr = var_replace(expr, var, d0_repl)
@@ -450,6 +465,7 @@ class Solver:
                         d0_repl="0.0",
                         d1_repl="0.0",
                         d2_repl="0.0",
+                        dn_repl=lambda n: "0.0",
                         z_repl=None,
                     )
                 if verbose:
@@ -537,6 +553,7 @@ class Solver:
                                 d0_repl="mask",
                                 d1_repl="grid.d1[{}, :]".format(index),
                                 d2_repl="grid.d2[{}, :]".format(index),
+                                dn_repl=lambda n: "grid.D({})[{}, :]".format(n, index),
                                 z_repl="grid.zg[{}]".format(index),
                             )
                             if verbose:
