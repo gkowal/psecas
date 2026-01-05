@@ -49,9 +49,7 @@ class ChebyshevExtremaGrid(Grid):
 
         d2 = np.dot(d1, d1)
         self.zg = -(zg - 1) * L / 2 + self.zmin
-        self.d0 = np.eye(self.NN)
-        self.d1 = -d1 / factor
-        self.d2 = d2 / factor ** 2
+        self._d = [ np.eye(self.NN), -d1 / factor, d2 / factor ** 2 ]
 
         # Call other objects that depend on the grid
         for callback in self._observers:
