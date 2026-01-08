@@ -228,6 +228,80 @@ class Solver:
         return σ, v
 
 
+    def filter_modes(self, Σ, V, *, re_range=None, im_range=None, require_re_positive=True):
+        """
+        Filter eigenvalues/eigenvectors using simple, explicit criteria.
+
+        Parameters
+        ----------
+        Σ : array-like (complex)
+            Eigenvalues.
+        V : array-like
+            Eigenvectors as columns aligned with E. May be None.
+        re_range : (re_min, re_max) or None
+            Optional bounds for the real part. Use None for an open bound.
+        im_range : (im_min, im_max) or None
+            Optional bounds for the imaginary part. Use None for an open bound.
+        require_re_positive : bool
+            If True, require Re(E) > 0 regardless of re_range.
+
+        Returns
+        -------
+        Σ_f : np.ndarray
+            Filtered eigenvalues.
+        V_f : np.ndarray or None
+            Filtered eigenvectors (columns), or None if V was None.
+        """
+        import numpy as np
+
+        Σ = np.asarray(Σ)
+        if Σ.ndim != 1:
+            Σ = Σ.reshape(-1)
+
+        # Always reject NaN/Inf eigenvalues to keep matching/ranking stable.
+        mask = np.isfinite(Σ.real) & np.isfinite(Σ.imag)
+
+        if require_re_positive:
+            mask &= (Σ.real > 0)
+
+        if re_range is not None:
+            re_min, re_max = re_range
+            if re_min is not None:
+                mask &= (Σ.real >= re_min)
+            if re_max is not None:
+                mask &= (Σ.real <= re_max)
+
+        if im_range is not None:
+            im_min, im_max = im_range
+            if im_min is not None:
+                mask &= (Σ.imag >= im_min)
+            if im_max is not None:
+                mask &= (Σ.imag <= im_max)
+
+        Σ_f = Σ[mask]
+
+        if Σ_f.size == 0:
+            # No modes survived filtering: signal a hard failure to the caller
+            Σ_f = None
+            V_f = None
+            raise ValueError(
+                "filter_modes(): no eigenmodes left after filtering; "
+                "relax filtering criteria or check problem setup."
+            )
+
+        if V is None:
+            V_f = None
+        else:
+            V = np.asarray(V)
+            # Expect eigenvectors as columns: shape (ndof, neigs)
+            # If V is 1D (single eigenvector), treat as one column.
+            if V.ndim == 1:
+                V = V.reshape(-1, 1)
+            V_f = V[:, mask]
+
+        return Σ_f, V_f
+
+
     def solve(self, useOPinv=True, verbose=False, mode=0, saveall=False):
         """
         Construct and solve the (generalized) eigenvalue problem (EVP)
