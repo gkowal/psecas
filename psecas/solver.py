@@ -465,7 +465,7 @@ class Solver:
         if verbose:
             _print_modes(Σ_old, self.grid.N)
 
-        mode = 0 if maxmode is None else min(maxmode, Σ_old.size)
+        mode, modes = _select(Σ_old.size, maxmode, allmodes)
 
         error = np.inf
         delta = np.inf
@@ -513,14 +513,14 @@ class Solver:
             Σ_old = np.copy(Σ_new)
             V_old = np.copy(V_new)
 
-        self.keep_result(Σ_new[mode], V_new[:,mode], mode)
+        self.keep_result(Σ_old[mode], V_old[:,mode], mode)
         self.system.result.update({"converged": False})
         self.system.result.update({"error": error})
         self.system.result.update({"grid": self.grid.zg})
 
         if allmodes:
-            return Σ_new[:modes], V_new[:, :modes], errors[:modes]
-        return Σ_new[mode], V_new[:,mode], errors[mode]
+            return Σ_old[:modes], V_old[:, :modes], errors[:modes]
+        return Σ_old[mode], V_old[:,mode], errors[mode]
 
 
     def solve(self, useOPinv=True, verbose=False, mode=0, saveall=False):
