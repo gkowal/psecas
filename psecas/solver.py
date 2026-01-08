@@ -302,7 +302,7 @@ class Solver:
         return Σ_f, V_f
 
 
-    def iterate_solve_multimode(self, Ns, maxmode=None,
+    def iterate_solve_multimode(self, Ns, maxmode=None, allmodes=False,
                        rtol=1e-6, atol=1e-14, gtol=1e-2,
                        orderby='tolerance', metric="real",
                        re_range=None, im_range=None,
@@ -329,6 +329,14 @@ class Solver:
             Index of the mode to be returned after ordering and filtering.
             If None, the dominant mode according to the ordering criterion
             is selected.
+
+        allmodes : bool
+            If False (default), return only a single eigenmode selected
+            by maxmode (or the dominant mode if maxmode is None).
+
+            If True, return all eigenmodes from index 0 up to and including
+            maxmode, after ordering and filtering. If maxmode is None,
+            all surviving eigenmodes are returned.
 
         rtol : float
             Relative tolerance for eigenvalue convergence between
@@ -433,6 +441,23 @@ class Solver:
                 index = np.argsort(errors)
             return errors[index], deltas[index], index
 
+        # Helper: choose selected index and how many modes to return
+        def _select(Nmodes, maxmode, allmodes):
+            if Nmodes <= 0:
+                return 0, 0
+            if maxmode is None:
+                # Default: select mode 0; if allmodes, return all
+                m = 0
+                k = Nmodes if allmodes else 1
+                return m, k
+
+            # maxmode is an index; clamp to [0, Nmodes-1]
+            m = max(0, min(int(maxmode), Nmodes - 1))
+
+            # if allmodes: return 0..sel inclusive -> k = sel+1
+            k = (m + 1) if allmodes else 1
+            return m, k
+
 
         self.grid.N = Ns[0]
         Σ, V = self.solve_full()
@@ -441,6 +466,7 @@ class Solver:
             _print_modes(Σ_old, self.grid.N)
 
         mode = 0 if maxmode is None else min(maxmode, Σ_old.size)
+
         error = np.inf
         delta = np.inf
 
@@ -467,7 +493,7 @@ class Solver:
             Σ_new = Σ_new[index]
             V_new = V_new[:,index]
 
-            mode = 0 if maxmode is None else min(maxmode, Σ_new.size)
+            mode, modes = _select(Σ_new.size, maxmode, allmodes)
 
             error = errors[mode]
             delta = deltas[mode]
@@ -480,6 +506,8 @@ class Solver:
                 self.system.result.update({"converged": True})
                 self.system.result.update({"error": error})
                 self.system.result.update({"grid": self.grid.zg})
+                if allmodes:
+                    return Σ_new[:modes], V_new[:, :modes], errors[:modes]
                 return Σ_new[mode], V_new[:,mode], errors[mode]
 
             Σ_old = np.copy(Σ_new)
@@ -490,6 +518,8 @@ class Solver:
         self.system.result.update({"error": error})
         self.system.result.update({"grid": self.grid.zg})
 
+        if allmodes:
+            return Σ_new[:modes], V_new[:, :modes], errors[:modes]
         return Σ_new[mode], V_new[:,mode], errors[mode]
 
 
