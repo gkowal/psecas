@@ -112,6 +112,122 @@ class Solver:
         return Σ, V
 
 
+    def solve_mode(self, guess, useOPinv=True, verbose=False, refine=True):
+        """
+        Construct and solve the (generalized) eigenvalue problem (EVP)
+
+            M₁ v = σ M₂ v
+
+        generated with the grid and parameters contained in the system object.
+
+        Here σ is the eigenvalue and v is the eigenmode.
+        Note that M₂ is a diagonal matrix if no boundary conditions are set.
+        In that case the EVP is simply
+
+            M₁ v = σ v
+
+        This method stores a dictionary with the result of the calculation
+        in self.system.result.
+
+        Returns: One eigenvalue and its eigenvector.
+
+        guess: Scipy's eigs method is used to find a
+        single eigenvalue in the proximity of the guess.
+
+        Optional parameters
+
+        useOPinv (default True): If true, manually calculate OPinv instead of
+        letting eigs do it.
+
+        verbose (default False): print out information about the calculation.
+
+        refine : bool
+            If True, refine returned eigenvectors using fixed-σ inverse iteration.
+        """
+        import numpy as np
+        import scipy.sparse as sp
+        from scipy.sparse.linalg import eigs, splu, LinearOperator
+
+        def rel_residual(A, B, σ, v):
+            r = A @ v - σ * (B @ v)
+            return np.linalg.norm(r) / (np.linalg.norm(A @ v) + abs(σ) * np.linalg.norm(B @ v))
+
+        def refine_eigenvector(A, σ, v, B=None, nsteps=10, rtol=1e-3):
+            """
+            Fixed-sigma inverse iteration refinement.
+
+            generalized: (A - σ B) w = B v
+            standard:    (A - σ I) w = v   (i.e., B=I)
+
+            Factors (A - σ B) once since sigma is fixed.
+            """
+            A = A.tocsc()
+            n = A.shape[0]
+
+            if B is None:
+                B = sp.eye(n, format="csc", dtype=A.dtype)
+            else:
+                B = B.tocsc()
+
+            K = (A - σ * B).tocsc()
+            lu = splu(K)
+
+            for _ in range(nsteps):
+                w  = lu.solve(B @ v)
+                w /= np.linalg.norm(w)
+                v  = w
+                ε  = rel_residual(A, B, σ, v)
+                if ε < rtol:
+                    break
+
+            return v, ε
+
+        sigma0 = guess
+
+        self.get_matrix1()
+        A = self.mat1.tocsc()
+        if self.do_gen_evp:
+            self.get_matrix2()
+            B = self.mat2.tocsc()
+        else:
+            B = None
+
+        if self.do_gen_evp:
+            if useOPinv:
+                n  = A.shape[0]
+                K  = (A - sigma0 * B).tocsc()
+                lu = splu(K)
+
+                OPinv = LinearOperator((n, n), matvec=lu.solve, dtype=A.dtype)
+
+                Σ, V = eigs(A, M=B, sigma=sigma0, k=1, OPinv=OPinv)
+            else:
+                Σ, V = eigs(A, M=B, sigma=sigma0, k=1)
+
+        else:
+            if useOPinv:
+                n = A.shape[0]
+
+                K = (A - sigma0 * sp.eye(n, format="csc", dtype=A.dtype))
+                lu = splu(K)
+
+                OPinv = LinearOperator((n, n), matvec=lu.solve, dtype=A.dtype)
+
+                Σ, V = eigs(A, sigma=sigma0, k=1, OPinv=OPinv)
+            else:
+                Σ, V = eigs(A, sigma=sigma0, k=1)
+
+        if refine:
+            for m in range(Σ.size):
+                v, r = refine_eigenvector(A, Σ[m], V[:,m], B=B)
+                V[:,m] = v
+
+        σ = Σ[0]
+        v = V[:,0]
+
+        return σ, v
+
+
     def solve(self, useOPinv=True, verbose=False, mode=0, saveall=False):
         """
         Construct and solve the (generalized) eigenvalue problem (EVP)
