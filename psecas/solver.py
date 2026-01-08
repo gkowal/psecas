@@ -80,6 +80,38 @@ class Solver:
                     print(msg)
         return
 
+
+    def solve_full(self):
+        """
+        Construct matrices and solve the full EVP/GEVP.
+
+        Returns
+        -------
+        E : np.ndarray
+            All eigenvalues (unsorted).
+        V : np.ndarray
+            Eigenvectors as columns (unsorted, aligned with E).
+
+        Notes
+        -----
+        This function intentionally performs *no* sorting/filtering and has no
+        side-effects (does not call keep_result and does not write self.E/self.v).
+        """
+        from scipy.linalg import eig
+
+        self.get_matrix1()
+
+        # Solve a generalized EVP
+        if self.do_gen_evp:
+            self.get_matrix2()
+            Σ, V = eig(self.mat1.toarray(), self.mat2.toarray())
+        # Solve a standard EVP
+        else:
+            Σ, V = eig(self.mat1.toarray())
+
+        return Σ, V
+
+
     def solve(self, useOPinv=True, verbose=False, mode=0, saveall=False):
         """
         Construct and solve the (generalized) eigenvalue problem (EVP)
