@@ -170,3 +170,11 @@ class Grid:
         assert type(vec) is np.ndarray
         assert vec.shape[0] == self.NN
         return np.matmul(self.d2, vec)
+
+    def derivative(self, vec, n):
+        """N-th order derivative of vec defined at zg"""
+        import numpy as np
+
+        assert type(vec) is np.ndarray
+        assert vec.shape[0] == self.NN
+        return np.matmul(self.D(n), vec)
