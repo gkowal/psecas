@@ -308,26 +308,77 @@ class Solver:
                        re_range=None, im_range=None,
                        useOPinv=True, verbose=False):
         """
-        Iteratively call the solve method with increasing grid resolution, N.
-        Returns when the relative difference in the eigenvalue is less than
-        the tolerance, rtol.
+        Iteratively solve the eigenvalue problem over a sequence of
+        increasing grid resolutions using a multimode, hybrid strategy.
 
-        Ns: list of resolutions to try, e.g. Ns = arange(32)*10
+        At the lowest resolution, a full-spectrum solve is performed.
+        At higher resolutions, the solver dynamically switches between
+        full solves and single-mode shift-invert solves, depending on
+        the estimated convergence error of each tracked mode.
 
-        rtol: the relative tolerance of the eigenvalue solver
+        Eigenmodes are filtered using explicit physical and numerical
+        criteria, tracked across resolutions using a configurable
+        error metric, and iterated until convergence.
 
-        atol: the absolute tolerance of the eigenvalue solver
+        Parameters
+        ----------
+        Ns : sequence of int
+            Grid resolutions to iterate over, in increasing order.
 
-        guess_tol: Increasing the resolution will inevitably lead to a more
-        expensive computation. A speedup can however be achieved when
-        searching for a single eigenvalue. This method can in this
-        case use the eigenvalue from the previous calculation as a guess for
-        the result of the new calculation. The parameter guess_tol makes sure
-        that the guess used is a good guess. If guess_tol=0.1 the method will
-        start using guesses when the relative difference to the previous
-        iteration is 10 %.
+        maxmode : int or None
+            Index of the mode to be returned after ordering and filtering.
+            If None, the dominant mode according to the ordering criterion
+            is selected.
 
-        verbose (default False): print out information about the calculation.
+        rtol : float
+            Relative tolerance for eigenvalue convergence between
+            successive grid resolutions.
+
+        atol : float
+            Absolute tolerance used in convergence tests and as a lower
+            bound for relative error normalization.
+
+        gtol : float
+            Relative error threshold controlling the solver strategy.
+            The relative error is computed using a denominator given by
+            max(atol, |σ|), where σ is the eigenvalue magnitude.
+            If the estimated relative error is below gtol, the solver
+            may switch from a full-spectrum solve to a single-mode
+            shift-invert solve using the previous eigenvalue as a guess.
+
+        orderby : str
+            Criterion used to order eigenmodes after filtering.
+
+        metric : str
+            Error metric used to compare eigenvalues across resolutions,
+            e.g. comparison of real parts or full complex values.
+
+        re_range : (float, float) or None
+            Optional bounds on the real part of the eigenvalues used
+            for filtering. Use None for open bounds.
+
+        im_range : (float, float) or None
+            Optional bounds on the imaginary part of the eigenvalues
+            used for filtering. Use None for open bounds.
+
+        useOPinv : bool
+            If True, use an explicit shift-invert operator when performing
+            single-mode solves.
+
+        verbose : bool
+            If True, print detailed information about solver progress,
+            convergence status, and strategy switching.
+
+        Returns
+        -------
+        sigma : complex
+            The converged eigenvalue of the selected mode.
+
+        v : ndarray
+            The corresponding eigenvector.
+
+        error : float
+            Final convergence error estimate for the selected mode.
         """
         import numpy as np
 
