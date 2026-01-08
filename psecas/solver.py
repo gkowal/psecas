@@ -302,6 +302,146 @@ class Solver:
         return Σ_f, V_f
 
 
+    def iterate_solve_multimode(self, Ns, maxmode=None,
+                       rtol=1e-6, atol=1e-14, gtol=1e-2,
+                       orderby='tolerance', metric="real",
+                       re_range=None, im_range=None,
+                       useOPinv=True, verbose=False):
+        """
+        Iteratively call the solve method with increasing grid resolution, N.
+        Returns when the relative difference in the eigenvalue is less than
+        the tolerance, rtol.
+
+        Ns: list of resolutions to try, e.g. Ns = arange(32)*10
+
+        rtol: the relative tolerance of the eigenvalue solver
+
+        atol: the absolute tolerance of the eigenvalue solver
+
+        guess_tol: Increasing the resolution will inevitably lead to a more
+        expensive computation. A speedup can however be achieved when
+        searching for a single eigenvalue. This method can in this
+        case use the eigenvalue from the previous calculation as a guess for
+        the result of the new calculation. The parameter guess_tol makes sure
+        that the guess used is a good guess. If guess_tol=0.1 the method will
+        start using guesses when the relative difference to the previous
+        iteration is 10 %.
+
+        verbose (default False): print out information about the calculation.
+        """
+        import numpy as np
+
+        def _print_modes(Σ, N, case=None, delta=None, error=None):
+            n = Σ.size
+            fmt = f" {n:2d}" if n < 100 else ">99"
+            print(f"N: {N:4d}, {fmt} eigenvalue{'s' if n > 1 else ' '}: ", end='')
+            m = min(3, n)
+            for i in range(m):
+                print(f" {Σ[i]:.4e}", end='')
+            if case is None:
+                print(" ..." if n > m else '', ' '*10)
+            else:
+                print(" ...," if n > m else '', end='')
+                if delta is not None:
+                    print(f", Δσ/σ : {delta:.2e}", end='')
+                if error is not None:
+                    print(f", error : {error:.2e}", end='')
+                print(f"{case}", ' '*10)
+
+        def _errors(Σ_new, Σ_old, rtol=1e-5, atol=1e-10, metric='complex', orderby='tolerance'):
+            errors = []
+            deltas = []
+            if metric == 'real':
+                for i in range(Σ_new.size):
+                    ΔΣ  = np.abs(Σ_old.real - Σ_new[i].real)
+                    j   = np.argsort(ΔΣ)[0]
+                    err = ΔΣ[j] / (atol + rtol * max(np.abs(Σ_new[i].real), np.abs(Σ_old[j].real)))
+                    errors.append(err)
+            elif metric == 'imag':
+                for i in range(Σ_new.size):
+                    ΔΣ  = np.abs(Σ_old.imag - Σ_new[i].imag)
+                    j   = np.argsort(ΔΣ)[0]
+                    err = ΔΣ[j] / (atol + rtol * max(np.abs(Σ_new[i].imag), np.abs(Σ_old[j].imag)))
+                    errors.append(err)
+            else:
+                for i in range(Σ_new.size):
+                    ΔΣ  = np.abs(Σ_old - Σ_new[i])
+                    j   = np.argsort(ΔΣ)[0]
+                    err = ΔΣ[j] / (atol + rtol * max(np.abs(Σ_new[i]), np.abs(Σ_old[j])))
+                    errors.append(err)
+            for i in range(Σ_new.size):
+                ΔΣ  = np.abs(Σ_old - Σ_new[i])
+                j   = np.argsort(ΔΣ)[0]
+                dlt = ΔΣ[j] / max(atol, np.abs(Σ_new[i]))
+                deltas.append(dlt)
+            deltas = np.array(deltas)
+            errors = np.array(errors)
+            if orderby == 'amplitude':
+                index = np.argsort(Σ_new.real)
+            else:
+                index = np.argsort(errors)
+            return errors[index], deltas[index], index
+
+
+        self.grid.N = Ns[0]
+        Σ, V = self.solve_full()
+        Σ_old, V_old = self.filter_modes(Σ, V, re_range=re_range, im_range=im_range)
+        if verbose:
+            _print_modes(Σ_old, self.grid.N)
+
+        mode = 0 if maxmode is None else min(maxmode, Σ_old.size)
+        error = np.inf
+        delta = np.inf
+
+        for N in Ns[1:]:
+            self.grid.N = N
+            if delta > gtol:
+                case = ''
+                Σ, V = self.solve_full()
+            else:
+                case = ' [with guess]'
+                Σ = []
+                V = []
+                for i, σ0 in enumerate(Σ_old.tolist()):
+                    σ, v = self.solve_mode(σ0, useOPinv=useOPinv, verbose=verbose)
+                    Σ.append(σ)
+                    V.append(v)
+                Σ = np.array(Σ)
+                V = np.array(V).T
+
+            Σ_new, V_new = self.filter_modes(Σ, V, re_range=re_range, im_range=im_range)
+
+            errors, deltas, index = _errors(Σ_new, Σ_old, rtol=rtol, atol=atol, metric=metric, orderby=orderby)
+
+            Σ_new = Σ_new[index]
+            V_new = V_new[:,index]
+
+            mode = 0 if maxmode is None else min(maxmode, Σ_new.size)
+
+            error = errors[mode]
+            delta = deltas[mode]
+
+            if verbose:
+                _print_modes(Σ_new, self.grid.N, case=case, delta=delta, error=error)
+
+            if error <= 1.0:
+                self.keep_result(Σ_new[mode], V_new[:,mode], mode)
+                self.system.result.update({"converged": True})
+                self.system.result.update({"error": error})
+                self.system.result.update({"grid": self.grid.zg})
+                return Σ_new[mode], V_new[:,mode], errors[mode]
+
+            Σ_old = np.copy(Σ_new)
+            V_old = np.copy(V_new)
+
+        self.keep_result(Σ_new[mode], V_new[:,mode], mode)
+        self.system.result.update({"converged": False})
+        self.system.result.update({"error": error})
+        self.system.result.update({"grid": self.grid.zg})
+
+        return Σ_new[mode], V_new[:,mode], errors[mode]
+
+
     def solve(self, useOPinv=True, verbose=False, mode=0, saveall=False):
         """
         Construct and solve the (generalized) eigenvalue problem (EVP)
