@@ -479,7 +479,8 @@ class Solver:
                 case = ' [with guess]'
                 Σ = []
                 V = []
-                for i, σ0 in enumerate(Σ_old.tolist()):
+                for i in range(modes):
+                    σ0 = Σ_old[i]
                     σ, v = self.solve_mode(σ0, useOPinv=useOPinv, verbose=verbose)
                     Σ.append(σ)
                     V.append(v)
