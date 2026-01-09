@@ -390,16 +390,22 @@ class Solver:
         """
         import numpy as np
 
-        def _print_modes(Σ, N, case=None, delta=None, error=None):
+        def _print_modes(Σ, N, errors=None, case=None, delta=None, error=None):
             n = Σ.size
             fmt = f" {n:2d}" if n < 100 else ">99"
             print(f"N: {N:4d}, {fmt} eigenvalue{'s' if n > 1 else ' '}: ", end='')
             m = min(3, n)
-            for i in range(m):
-                print(f" {Σ[i]:.4e}", end='')
             if case is None:
+                for i in range(m):
+                    print(f" {Σ[i]:.4e}", end='')
                 print(" ..." if n > m else '', ' '*10)
             else:
+                if errors is None:
+                    for i in range(m):
+                        print(f" {Σ[i]:.4e}", end='')
+                else:
+                    for i in range(m):
+                        print(f" {Σ[i]:.4e} ({errors[i]:.2e})", end='')
                 print(" ...," if n > m else '', end='')
                 if delta is not None:
                     print(f", Δσ/σ : {delta:.2e}", end='')
@@ -500,7 +506,7 @@ class Solver:
             delta = deltas[mode]
 
             if verbose:
-                _print_modes(Σ_new, self.grid.N, case=case, delta=delta, error=error)
+                _print_modes(Σ_new, self.grid.N, errors=errors, case=case, delta=delta, error=error)
 
             if error <= 1.0:
                 self.keep_result(Σ_new[mode], V_new[:,mode], mode)
