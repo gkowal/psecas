@@ -467,63 +467,82 @@ class Solver:
             print("\nParsing equation:", eq)
 
         for i, var in enumerate(self.system.variables):
-            if var in eq:
-                variables_t = list(np.copy(self.system.variables))
-                eq_t = eq
-                # Apply equation substitutions
-                if hasattr(self.system, 'substitutions'):
-                    for substitution in self.system.substitutions:
-                        sub_split = substitution.split('=')
-                        eq_t = var_replace(eq_t, sub_split[0].strip(), sub_split[1])
+            # Fast path: variable absent -> sparse zero (no dense zeros)
+            if var not in eq:
+                mats.append(sparse.lil_matrix((NN, NN), dtype=np.complex128))
+                continue
+
+            variables_t = list(np.copy(self.system.variables))
+            eq_t = eq
+
+            # Apply equation substitutions
+            if hasattr(self.system, "substitutions"):
+                for substitution in self.system.substitutions:
+                    sub_split = substitution.split("=")
+                    eq_t = var_replace(eq_t, sub_split[0].strip(), sub_split[1])
+                    if verbose:
                         print(eq_t)
-                eq_t = self._rewrite_derivatives(eq_t, grid, var)
 
-                variables_t.remove(var)
-                for var2 in variables_t:
-                    eq_t = self._rewrite_derivatives(
-                        eq_t, grid, var2,
-                        d0_repl="0.0",
-                        d1_repl="0.0",
-                        d2_repl="0.0",
-                        dn_repl=lambda n: "0.0",
-                        z_repl=None,
-                    )
-                if verbose:
-                    print("\nEvaluating expression:", eq_t)
-                try:
-                    err_msg1 = (
-                        "During the parsing of:\n\n{}\n\n"
-                        "Psecas tried to evaluate\n\n{}\n\n"
-                        "while attempting to evaluate the terms with: {}"
-                        "\nThis caused the following error to occur:\n\n"
-                    )
-                    # Evaluate the expression in a restricted environment.
-                    submat = eval(eq_t, {"__builtins__": {}}, env).T
+            eq_t = self._rewrite_derivatives(eq_t, grid, var)
 
-                except NameError as e:
-                    strerror, = e.args
-                    err_msg2 = (
-                        "\n\nThis is likely because the missing variable has"
-                        "\nnot been defined in your systems class or its\n"
-                        "make_background method."
-                    )
-                    raise NameError(
-                        err_msg1.format(eq, eq_t, var) + strerror + err_msg2
-                    )
-                except Exception as e:
-                    raise Exception(err_msg1.format(eq, eq_t, var) + str(e))
-                submat = np.array(submat, dtype="complex128")
+            variables_t.remove(var)
+            for var2 in variables_t:
+                eq_t = self._rewrite_derivatives(
+                    eq_t, grid, var2,
+                    d0_repl="0.0",
+                    d1_repl="0.0",
+                    d2_repl="0.0",
+                    dn_repl=lambda n: "0.0",
+                    z_repl=None,
+                )
+
+            if verbose:
+                print("\nEvaluating expression:", eq_t)
+
+            try:
+                err_msg1 = (
+                    "During the parsing of:\n\n{}\n\n"
+                    "Psecas tried to evaluate\n\n{}\n\n"
+                    "while attempting to evaluate the terms with: {}"
+                    "\nThis caused the following error to occur:\n\n"
+                )
+                # Evaluate the expression in a restricted environment.
+                submat = eval(eq_t, {"__builtins__": {}}, env)
+
+            except NameError as e:
+                strerror, = e.args
+                err_msg2 = (
+                    "\n\nThis is likely because the missing variable has"
+                    "\nnot been defined in your systems class or its\n"
+                    "make_background method."
+                )
+                raise NameError(err_msg1.format(eq, eq_t, var) + strerror + err_msg2)
+            except Exception as e:
+                raise Exception(err_msg1.format(eq, eq_t, var) + str(e))
+
+            # Transpose (works for both dense and sparse)
+            submat = submat.T
+
+            # Keep sparse as sparse; only densify if truly dense
+            if sparse.issparse(submat):
+                # Enforce dtype without copying if possible, then LIL for later row edits
+                if submat.dtype != np.complex128:
+                    submat = submat.astype(np.complex128, copy=False)
+                # Optional: enforce shape early (helps catch subtle eval/template issues)
+                if submat.shape != (NN, NN):
+                    raise ValueError(f"Submatrix has shape {submat.shape}, expected {(NN, NN)}")
+                mats.append(submat.tolil())
             else:
-                submat = np.zeros((NN, NN), dtype=np.complex128)
+                # Dense path (only when eval produced dense)
+                submat = np.asarray(submat, dtype=np.complex128)
+                if submat.shape != (NN, NN):
+                    raise ValueError(f"Submatrix has shape {submat.shape}, expected {(NN, NN)}")
 
-            # Prevent sparse.lil_matrix from changing the shape of
-            # a numpy array which is all zeros.
-            if np.count_nonzero(submat) == 0:
-                submat = np.zeros((NN, NN), dtype=np.complex128)
-
-            mats.append(sparse.lil_matrix(submat))
+                # Convert dense -> sparse LIL
+                mats.append(sparse.lil_matrix(submat))
 
         return mats
+
 
     def _modify_submatrix(self, submat, eq_n, var_n, boundary, binfo, verbose=False):
         """
