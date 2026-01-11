@@ -455,9 +455,10 @@ class Solver:
         from scipy import sparse
         from .string_methods import var_replace
 
-        # This is a nasty trick
-        globals().update(self.system.__dict__)
         grid = self.system.grid
+
+        env = dict(self.system.__dict__)
+        env["grid"] = grid
 
         NN = self.grid.NN
         mats = []
@@ -496,8 +497,9 @@ class Solver:
                         "while attempting to evaluate the terms with: {}"
                         "\nThis caused the following error to occur:\n\n"
                     )
-                    # Evaluate the expression
-                    submat = eval(eq_t).T
+                    # Evaluate the expression in a restricted environment.
+                    submat = eval(eq_t, {"__builtins__": {}}, env).T
+
                 except NameError as e:
                     strerror, = e.args
                     err_msg2 = (
@@ -539,9 +541,10 @@ class Solver:
         import numpy as np
         from .string_methods import var_replace
 
-        # This is a nasty trick
-        globals().update(self.system.__dict__)
         grid = self.system.grid
+
+        env = dict(self.system.__dict__)
+        env["grid"] = grid
 
         N = self.grid.N
         if boundary:
@@ -567,6 +570,7 @@ class Solver:
 
                             mask = np.zeros(self.grid.NN)
                             mask[index] = 1
+                            env["mask"] = mask
                             bound_t = self._rewrite_derivatives(
                                 bound_t, grid, var,
                                 d0_repl="mask",
@@ -584,8 +588,9 @@ class Solver:
                                     "while attempting to evaluate the boundary on: {}"
                                     "\nThis caused the following error to occur:\n\n"
                                 )
-                                # Evaluate the expression
-                                submat[index, :] = eval(bound_t)
+                                # Evaluate the expression in a restricted environment.
+                                submat[index, :] = eval(bound_t, {"__builtins__": {}}, env)
+
                             except NameError as e:
                                 strerror, = e.args
                                 err_msg2 = (
