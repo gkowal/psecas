@@ -772,7 +772,7 @@ class Solver:
         from .string_methods import var_replace
 
         dim = self.system.dim
-        grid = self.grid
+        N = self.grid.N
         equations = self.system.equations
         boundaries = self.system.boundaries
         extra_binfo = self.system.extra_binfo
@@ -788,7 +788,7 @@ class Solver:
         for j in range(dim):
             for i in range(dim):
                 if all((boundaries)) and not self.do_gen_evp:
-                    rows[j][i] = rows[j][i][1:grid.N, 1:grid.N]
+                    rows[j][i] = rows[j][i][1:N, 1:N]
                 elif any(boundaries):
                     rows[j][i] = self._modify_submatrix(rows[j][i],
                                                         j + 1, i + 1,
@@ -827,12 +827,31 @@ class Solver:
         for j in range(dim):
             for i in range(dim):
                 if all((boundaries)) and not self.do_gen_evp:
-                    rows[j][i] = rows[j][i][1:grid.N, 1:grid.N]
+                    rows[j][i] = rows[j][i][1:N, 1:N]
                 elif any(boundaries):
-                    if extra_binfo[j][0] is not None:
-                        rows[j][i][0, 0] = 0
-                    if extra_binfo[j][1] is not None:
-                        rows[j][i][N, N] = 0
+                    # In generalized EVP mode, boundary conditions are imposed by
+                    # row-replacement in mat1 (A). To keep BC equations independent
+                    # of the eigenvalue, we must zero the corresponding rows in
+                    # mat2 (B), i.e. enforce: (BC row) -> 0 = lambda * 0.
+                    #
+                    # We zero entire boundary rows across *all* block columns i.
+                    # This is stronger and correct; the previous implementation
+                    # only zeroed a single diagonal entry, which can leave
+                    # eigenvalue-coupled residual terms in BC rows.
+                    if self.do_gen_evp and boundaries[j]:
+                        # Keep index convention consistent with _modify_submatrix():
+                        # boundary nodes are 0 and N (inclusive grid).
+                        if extra_binfo[j][0] is not None:
+                            rows[j][i][0, :] = 0
+                        if extra_binfo[j][1] is not None:
+                            rows[j][i][N, :] = 0
+                    else:
+                        # Backward-compatible behavior for non-generalized EVP:
+                        # preserve existing "diagonal-entry zeroing" logic.
+                        if extra_binfo[j][0] is not None:
+                            rows[j][i][0, 0] = 0
+                        if extra_binfo[j][1] is not None:
+                            rows[j][i][N, N] = 0
 
         # Assemble everything
         self.mat2 = sparse.bmat(rows, format='csr')
@@ -886,9 +905,10 @@ class Solver:
         from scipy import sparse
         from .string_methods import var_replace
 
-        # This is a nasty trick
-        globals().update(self.system.__dict__)
         grid = self.system.grid
+
+        env = dict(self.system.__dict__)
+        env["grid"] = grid
 
         NN = self.grid.NN
         mats = []
@@ -897,62 +917,82 @@ class Solver:
             print("\nParsing equation:", eq)
 
         for i, var in enumerate(self.system.variables):
-            if var in eq:
-                variables_t = list(np.copy(self.system.variables))
-                eq_t = eq
-                # Apply equation substitutions
-                if hasattr(self.system, 'substitutions'):
-                    for substitution in self.system.substitutions:
-                        sub_split = substitution.split('=')
-                        eq_t = var_replace(eq_t, sub_split[0].strip(), sub_split[1])
+            # Fast path: variable absent -> sparse zero (no dense zeros)
+            if var not in eq:
+                mats.append(sparse.lil_matrix((NN, NN), dtype=np.complex128))
+                continue
+
+            variables_t = list(np.copy(self.system.variables))
+            eq_t = eq
+
+            # Apply equation substitutions
+            if hasattr(self.system, "substitutions"):
+                for substitution in self.system.substitutions:
+                    sub_split = substitution.split("=")
+                    eq_t = var_replace(eq_t, sub_split[0].strip(), sub_split[1])
+                    if verbose:
                         print(eq_t)
-                eq_t = self._rewrite_derivatives(eq_t, grid, var)
 
-                variables_t.remove(var)
-                for var2 in variables_t:
-                    eq_t = self._rewrite_derivatives(
-                        eq_t, grid, var2,
-                        d0_repl="0.0",
-                        d1_repl="0.0",
-                        d2_repl="0.0",
-                        dn_repl=lambda n: "0.0",
-                        z_repl=None,
-                    )
-                if verbose:
-                    print("\nEvaluating expression:", eq_t)
-                try:
-                    err_msg1 = (
-                        "During the parsing of:\n\n{}\n\n"
-                        "Psecas tried to evaluate\n\n{}\n\n"
-                        "while attempting to evaluate the terms with: {}"
-                        "\nThis caused the following error to occur:\n\n"
-                    )
-                    # Evaluate the expression
-                    submat = eval(eq_t).T
-                except NameError as e:
-                    strerror, = e.args
-                    err_msg2 = (
-                        "\n\nThis is likely because the missing variable has"
-                        "\nnot been defined in your systems class or its\n"
-                        "make_background method."
-                    )
-                    raise NameError(
-                        err_msg1.format(eq, eq_t, var) + strerror + err_msg2
-                    )
-                except Exception as e:
-                    raise Exception(err_msg1.format(eq, eq_t, var) + str(e))
-                submat = np.array(submat, dtype="complex128")
+            eq_t = self._rewrite_derivatives(eq_t, grid, var)
+
+            variables_t.remove(var)
+            for var2 in variables_t:
+                eq_t = self._rewrite_derivatives(
+                    eq_t, grid, var2,
+                    d0_repl="0.0",
+                    d1_repl="0.0",
+                    d2_repl="0.0",
+                    dn_repl=lambda n: "0.0",
+                    z_repl=None,
+                )
+
+            if verbose:
+                print("\nEvaluating expression:", eq_t)
+
+            try:
+                err_msg1 = (
+                    "During the parsing of:\n\n{}\n\n"
+                    "Psecas tried to evaluate\n\n{}\n\n"
+                    "while attempting to evaluate the terms with: {}"
+                    "\nThis caused the following error to occur:\n\n"
+                )
+                # Evaluate the expression in a restricted environment.
+                submat = eval(eq_t, {"__builtins__": {}}, env)
+
+            except NameError as e:
+                strerror, = e.args
+                err_msg2 = (
+                    "\n\nThis is likely because the missing variable has"
+                    "\nnot been defined in your systems class or its\n"
+                    "make_background method."
+                )
+                raise NameError(err_msg1.format(eq, eq_t, var) + strerror + err_msg2)
+            except Exception as e:
+                raise Exception(err_msg1.format(eq, eq_t, var) + str(e))
+
+            # Transpose (works for both dense and sparse)
+            submat = submat.T
+
+            # Keep sparse as sparse; only densify if truly dense
+            if sparse.issparse(submat):
+                # Enforce dtype without copying if possible, then LIL for later row edits
+                if submat.dtype != np.complex128:
+                    submat = submat.astype(np.complex128, copy=False)
+                # Optional: enforce shape early (helps catch subtle eval/template issues)
+                if submat.shape != (NN, NN):
+                    raise ValueError(f"Submatrix has shape {submat.shape}, expected {(NN, NN)}")
+                mats.append(submat.tolil())
             else:
-                submat = np.zeros((NN, NN), dtype=np.complex128)
+                # Dense path (only when eval produced dense)
+                submat = np.asarray(submat, dtype=np.complex128)
+                if submat.shape != (NN, NN):
+                    raise ValueError(f"Submatrix has shape {submat.shape}, expected {(NN, NN)}")
 
-            # Prevent sparse.lil_matrix from changing the shape of
-            # a numpy array which is all zeros.
-            if np.count_nonzero(submat) == 0:
-                submat = np.zeros((NN, NN), dtype=np.complex128)
-
-            mats.append(sparse.lil_matrix(submat))
+                # Convert dense -> sparse LIL
+                mats.append(sparse.lil_matrix(submat))
 
         return mats
+
 
     def _modify_submatrix(self, submat, eq_n, var_n, boundary, binfo, verbose=False):
         """
@@ -970,9 +1010,10 @@ class Solver:
         import numpy as np
         from .string_methods import var_replace
 
-        # This is a nasty trick
-        globals().update(self.system.__dict__)
         grid = self.system.grid
+
+        env = dict(self.system.__dict__)
+        env["grid"] = grid
 
         N = self.grid.N
         if boundary:
@@ -998,6 +1039,7 @@ class Solver:
 
                             mask = np.zeros(self.grid.NN)
                             mask[index] = 1
+                            env["mask"] = mask
                             bound_t = self._rewrite_derivatives(
                                 bound_t, grid, var,
                                 d0_repl="mask",
@@ -1015,8 +1057,9 @@ class Solver:
                                     "while attempting to evaluate the boundary on: {}"
                                     "\nThis caused the following error to occur:\n\n"
                                 )
-                                # Evaluate the expression
-                                submat[index, :] = eval(bound_t)
+                                # Evaluate the expression in a restricted environment.
+                                submat[index, :] = eval(bound_t, {"__builtins__": {}}, env)
+
                             except NameError as e:
                                 strerror, = e.args
                                 err_msg2 = (
