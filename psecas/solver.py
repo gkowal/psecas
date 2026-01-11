@@ -322,7 +322,7 @@ class Solver:
         from .string_methods import var_replace
 
         dim = self.system.dim
-        grid = self.grid
+        N = self.grid.N
         equations = self.system.equations
         boundaries = self.system.boundaries
         extra_binfo = self.system.extra_binfo
@@ -338,7 +338,7 @@ class Solver:
         for j in range(dim):
             for i in range(dim):
                 if all((boundaries)) and not self.do_gen_evp:
-                    rows[j][i] = rows[j][i][1:grid.N, 1:grid.N]
+                    rows[j][i] = rows[j][i][1:N, 1:N]
                 elif any(boundaries):
                     rows[j][i] = self._modify_submatrix(rows[j][i],
                                                         j + 1, i + 1,
@@ -377,7 +377,7 @@ class Solver:
         for j in range(dim):
             for i in range(dim):
                 if all((boundaries)) and not self.do_gen_evp:
-                    rows[j][i] = rows[j][i][1:grid.N, 1:grid.N]
+                    rows[j][i] = rows[j][i][1:N, 1:N]
                 elif any(boundaries):
                     if extra_binfo[j][0] is not None:
                         rows[j][i][0, 0] = 0
