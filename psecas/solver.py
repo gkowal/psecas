@@ -379,10 +379,29 @@ class Solver:
                 if all((boundaries)) and not self.do_gen_evp:
                     rows[j][i] = rows[j][i][1:N, 1:N]
                 elif any(boundaries):
-                    if extra_binfo[j][0] is not None:
-                        rows[j][i][0, 0] = 0
-                    if extra_binfo[j][1] is not None:
-                        rows[j][i][N, N] = 0
+                    # In generalized EVP mode, boundary conditions are imposed by
+                    # row-replacement in mat1 (A). To keep BC equations independent
+                    # of the eigenvalue, we must zero the corresponding rows in
+                    # mat2 (B), i.e. enforce: (BC row) -> 0 = lambda * 0.
+                    #
+                    # We zero entire boundary rows across *all* block columns i.
+                    # This is stronger and correct; the previous implementation
+                    # only zeroed a single diagonal entry, which can leave
+                    # eigenvalue-coupled residual terms in BC rows.
+                    if self.do_gen_evp and boundaries[j]:
+                        # Keep index convention consistent with _modify_submatrix():
+                        # boundary nodes are 0 and N (inclusive grid).
+                        if extra_binfo[j][0] is not None:
+                            rows[j][i][0, :] = 0
+                        if extra_binfo[j][1] is not None:
+                            rows[j][i][N, :] = 0
+                    else:
+                        # Backward-compatible behavior for non-generalized EVP:
+                        # preserve existing "diagonal-entry zeroing" logic.
+                        if extra_binfo[j][0] is not None:
+                            rows[j][i][0, 0] = 0
+                        if extra_binfo[j][1] is not None:
+                            rows[j][i][N, N] = 0
 
         # Assemble everything
         self.mat2 = sparse.bmat(rows, format='csr')
