@@ -406,7 +406,7 @@ class Solver:
                 else:
                     for i in range(m):
                         print(f" {Σ[i]:.4e} ({errors[i]:.2e})", end='')
-                print(" ...," if n > m else '', end='')
+                print(" ..." if n > m else '', end='')
                 if delta is not None:
                     print(f", Δσ/σ : {delta:.2e}", end='')
                 if error is not None:
