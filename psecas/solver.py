@@ -901,6 +901,7 @@ class Solver:
 
 
     def _find_submatrices(self, eq, verbose=False):
+        import builtins
         import numpy as np
         from scipy import sparse
         from .string_methods import var_replace
@@ -957,7 +958,7 @@ class Solver:
                     "\nThis caused the following error to occur:\n\n"
                 )
                 # Evaluate the expression in a restricted environment.
-                submat = eval(eq_t, {"__builtins__": {}}, env)
+                submat = eval(eq_t, {"__builtins__": {"__import__": builtins.__import__}}, env)
 
             except NameError as e:
                 strerror, = e.args
@@ -1007,6 +1008,7 @@ class Solver:
 
         The Boundary condition on a variable cannot depend on the other independent variables.
         """
+        import builtins
         import numpy as np
         from .string_methods import var_replace
 
@@ -1058,7 +1060,7 @@ class Solver:
                                     "\nThis caused the following error to occur:\n\n"
                                 )
                                 # Evaluate the expression in a restricted environment.
-                                submat[index, :] = eval(bound_t, {"__builtins__": {}}, env)
+                                submat[index, :] = eval(bound_t, {"__builtins__": {"__import__": builtins.__import__}}, env)
 
                             except NameError as e:
                                 strerror, = e.args
