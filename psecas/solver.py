@@ -474,7 +474,13 @@ class Solver:
         Σ, V = self.solve_full()
         Σ_old, V_old = self.filter_modes(Σ, V, re_range=re_range, im_range=im_range)
         if verbose:
-            _print_modes(Σ_old, self.grid.N)
+            if orderby in ['real_part', 'real']:
+                index = np.argsort(Σ_old.real)[::-1]
+            elif orderby in ['imag_part', 'imag', 'imaginary']:
+                index = np.argsort(Σ_old.imag)[::-1]
+            else:
+                index = np.argsort(np.abs(Σ_old))[::-1]
+            _print_modes(Σ_old[index], self.grid.N)
 
         mode, modes = _select(Σ_old.size, maxmode, allmodes)
 
