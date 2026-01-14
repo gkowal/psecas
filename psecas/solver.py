@@ -444,9 +444,9 @@ class Solver:
             errors = np.array(errors)
             if orderby in ['amplitude', 'magnitude']:
                 index = np.argsort(np.abs(Σ_new))[::-1]
-            elif orderby == 'real_part':
+            elif orderby in ['real_part', 'real']:
                 index = np.argsort(Σ_new.real)[::-1]
-            elif orderby == 'imag_part':
+            elif orderby in ['imag_part', 'imag', 'imaginary']:
                 index = np.argsort(Σ_new.imag)[::-1]
             else:
                 index = np.argsort(errors)
