@@ -437,7 +437,8 @@ class Solver:
             for i in range(Σ_new.size):
                 ΔΣ  = np.abs(Σ_old - Σ_new[i])
                 j   = np.argsort(ΔΣ)[0]
-                dlt = ΔΣ[j] / max(atol, np.abs(Σ_new[i]))
+                fac = 1.0 + np.abs(Σ_new[i].imag) / max(atol, Σ_new[i].real)
+                dlt = ΔΣ[j] / max(atol, np.abs(Σ_new[i])) * fac
                 deltas.append(dlt)
             deltas = np.array(deltas)
             errors = np.array(errors)
