@@ -441,8 +441,12 @@ class Solver:
                 deltas.append(dlt)
             deltas = np.array(deltas)
             errors = np.array(errors)
-            if orderby == 'amplitude':
-                index = np.argsort(Σ_new.real)
+            if orderby in ['amplitude', 'magnitude']:
+                index = np.argsort(np.abs(Σ_new))[::-1]
+            elif orderby == 'real_part':
+                index = np.argsort(Σ_new.real)[::-1]
+            elif orderby == 'imag_part':
+                index = np.argsort(Σ_new.imag)[::-1]
             else:
                 index = np.argsort(errors)
             return errors[index], deltas[index], index
