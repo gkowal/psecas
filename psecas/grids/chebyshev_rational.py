@@ -110,38 +110,68 @@ class ChebyshevRationalGrid(Grid):
         self.zg = z
         self._d  = Dz
 
+        # Store corresponding finite-domain Chebyshev-Gauss nodes (in x-space)
+        # and barycentric weights for Chebyshev-Gauss nodes for interpolation.
+        self._xg = x.copy()
+        self._bw = λ.copy()
+
         self.finalize_derivatives()
 
         # Call other objects that depend on the grid
         for callback in self._observers:
             callback()
 
-    def to_coefficients(self, f):
-        from numpy.polynomial.chebyshev import chebfit
-        import numpy as np
-
-        # Convert infinite grid to xg = [-1, 1]
-        xg = self.zg / np.sqrt(self.C ** 2 + self.zg ** 2)
-
-        # Get coefficients for standard Chebyshev polynomials
-        c, res = chebfit(xg, f, deg=self.N, full=True)
-
-        return c
-
     def interpolate(self, z, f):
-        """See equations 17.37 and 17.38 in Boyd"""
-        from numpy.polynomial.chebyshev import chebval
+        """
+        Robust interpolation using barycentric formula on Chebyshev–Gauss nodes.
+
+        Parameters
+        ----------
+        z : float or array-like
+            Points in physical (infinite) coordinate where to interpolate.
+        f : array-like
+            Function values sampled on self.zg (length self.NN).
+
+        Returns
+        -------
+        p : float or ndarray
+            Interpolated values at z.
+        """
         import numpy as np
+
+        z = np.asarray(z, dtype=float)
+        f = np.asarray(f)
+
+        if f.shape[0] != self.NN:
+            raise ValueError("f must have shape (self.NN,)")
 
         msg = "Can't interpolate outside grid domain"
-        assert np.array([z]).min() >= self.zmin, msg
-        assert np.array([z]).max() <= self.zmax, msg
+        if z.min() < self.zmin or z.max() > self.zmax:
+            raise ValueError(msg)
 
-        # Get coefficients for standard Chebyshev polynomials
-        c = self.to_coefficients(f)
+        # Map query points to x in [-1, 1]
+        C = float(self.C)
+        x = z / np.sqrt(C * C + z * z)
 
-        # Convert infinite grid to xg = [-1, 1]
-        x = z / np.sqrt(self.C ** 2 + z ** 2)
+        # Nodes and weights in x-space
+        xg = self._xg
+        w  = self._bw
 
-        # Evaluate the Chebyshev polynomial
-        return chebval(x, c)
+        # Vectorized barycentric interpolation
+        # Handle exact/near-exact node hits robustly to avoid division by zero.
+        x_flat = x.ravel()
+        out = np.empty_like(x_flat, dtype=np.result_type(f, x_flat))
+
+        # Tolerance for "hit a node" in x-space; scale with machine precision
+        tol = 50 * np.finfo(float).eps
+
+        for k, xv in enumerate(x_flat):
+            diff = xv - xg
+            jhit = np.where(np.abs(diff) <= tol)[0]
+            if jhit.size:
+                out[k] = f[jhit[0]]
+            else:
+                tmp = w / diff
+                out[k] = (tmp @ f) / tmp.sum()
+
+        return out.reshape(x.shape)
