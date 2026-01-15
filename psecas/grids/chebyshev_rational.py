@@ -59,22 +59,28 @@ class ChebyshevRationalGrid(Grid):
         self._C = value
         self.make_grid()
 
-    def cheb_roots(self, N):
+    def cheb_gauss_nodes_and_Dx(self, N):
         import numpy as np
 
-        d1 = np.zeros((N, N))
-        zg = np.cos(np.pi * (2 * np.arange(1, N + 1) - 1) / (2 * N))
-        zg = zg[::-1]
-        Q = 1 - zg ** 2
+        j = np.arange(1, N+1)
+        φ = (2*j - 1 - N) * np.pi / (2*N)   # Gauss angles (symmetric)
+        x = np.sin(φ)                       # Chebyshev-Gauss nodes
+        s = np.cos(φ)                       # as Q = sqrt(1 - x**2),
+                                            # does not suffer cancellation for |x| -> 1
+        λ = ((-1)**(j-1)) * np.cos(φ)       # barycentric weights, the most
+                                            # stable way to form an explicit
+                                            # first-derivative matrix with;
+                                            # any common scale on 𝜆 cancels
+        X  = x[:, None]
+        dX = X - X.T
+        np.fill_diagonal(dX, 1.0)
+        Dx = (λ[None, :] / λ[:, None]) / dX
+        np.fill_diagonal(Dx, 0.0)
 
-        with np.errstate(divide='ignore'):
-            for jj in range(N):
-                d1[:, jj] = (-1)**(np.arange(N) + jj) * \
-                    np.sqrt(Q[jj] / Q) / (zg - zg[jj])
+        # Diagonal = negative row sum
+        Dx[np.diag_indices(N)] = -Dx.sum(axis=1)
 
-        d1[np.diag_indices(N)] = 0.5 * zg / Q
-
-        return (zg, d1)
+        return s, x, λ, Dx
 
     def make_grid(self):
         import numpy as np
@@ -83,18 +89,26 @@ class ChebyshevRationalGrid(Grid):
         self.NN = self.N + 1
         N = self.NN
 
-        d1 = np.zeros((N, N))
-        [zg_int, d1_int] = self.cheb_roots(N)
+        # Improved grid generation considering floating point arithmetic
+        s, x, λ, Dx = self.cheb_gauss_nodes_and_Dx(N)
 
-        Q = 1 - zg_int ** 2.0
+        # nodes on TB grid
+        z = C * x / s
 
-        zg = C * zg_int / np.sqrt(Q)
+        A = np.diag((s**3)/C)
 
-        d1 = d1_int / C * Q[:, None]**(3/2)
+        Dz = [ np.eye(N) ]
+        # D^(1) = A @ Dx
+        Dprev = A @ Dx
+        Dz.append(Dprev.copy(order='C'))
 
-        d2 = np.dot(d1, d1)
-        self.zg = zg
-        self._d = [ np.eye(N), d1, d2 ]
+        # Higher orders: D^(m) = A @ (Dx @ D^(m-1)), keep this exact order
+        for m in range(2, self._max_derivative_order+1):
+            Dprev = A @ (Dx @ Dprev)
+            Dz.append(Dprev.copy(order='C'))
+
+        self.zg = z
+        self._d  = Dz
 
         self.finalize_derivatives()
 
