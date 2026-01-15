@@ -59,22 +59,28 @@ class ChebyshevRationalGrid(Grid):
         self._C = value
         self.make_grid()
 
-    def cheb_roots(self, N):
+    def cheb_gauss_nodes_and_Dx(self, N):
         import numpy as np
 
-        d1 = np.zeros((N, N))
-        zg = np.cos(np.pi * (2 * np.arange(1, N + 1) - 1) / (2 * N))
-        zg = zg[::-1]
-        Q = 1 - zg ** 2
+        j = np.arange(1, N+1)
+        φ = (2*j - 1 - N) * np.pi / (2*N)   # Gauss angles (symmetric)
+        x = np.sin(φ)                       # Chebyshev-Gauss nodes
+        s = np.cos(φ)                       # as Q = sqrt(1 - x**2),
+                                            # does not suffer cancellation for |x| -> 1
+        λ = ((-1)**(j-1)) * np.cos(φ)       # barycentric weights, the most
+                                            # stable way to form an explicit
+                                            # first-derivative matrix with;
+                                            # any common scale on 𝜆 cancels
+        X  = x[:, None]
+        dX = X - X.T
+        np.fill_diagonal(dX, 1.0)
+        Dx = (λ[None, :] / λ[:, None]) / dX
+        np.fill_diagonal(Dx, 0.0)
 
-        with np.errstate(divide='ignore'):
-            for jj in range(N):
-                d1[:, jj] = (-1)**(np.arange(N) + jj) * \
-                    np.sqrt(Q[jj] / Q) / (zg - zg[jj])
+        # Diagonal = negative row sum
+        Dx[np.diag_indices(N)] = -Dx.sum(axis=1)
 
-        d1[np.diag_indices(N)] = 0.5 * zg / Q
-
-        return (zg, d1)
+        return s, x, λ, Dx
 
     def make_grid(self):
         import numpy as np
@@ -83,18 +89,31 @@ class ChebyshevRationalGrid(Grid):
         self.NN = self.N + 1
         N = self.NN
 
-        d1 = np.zeros((N, N))
-        [zg_int, d1_int] = self.cheb_roots(N)
+        # Improved grid generation considering floating point arithmetic
+        s, x, λ, Dx = self.cheb_gauss_nodes_and_Dx(N)
 
-        Q = 1 - zg_int ** 2.0
+        # nodes on TB grid
+        z = C * x / s
 
-        zg = C * zg_int / np.sqrt(Q)
+        A = np.diag((s**3)/C)
 
-        d1 = d1_int / C * Q[:, None]**(3/2)
+        Dz = [ np.eye(N) ]
+        # D^(1) = A @ Dx
+        Dprev = A @ Dx
+        Dz.append(Dprev.copy(order='C'))
 
-        d2 = np.dot(d1, d1)
-        self.zg = zg
-        self._d = [ np.eye(N), d1, d2 ]
+        # Higher orders: D^(m) = A @ (Dx @ D^(m-1)), keep this exact order
+        for m in range(2, self._max_derivative_order+1):
+            Dprev = A @ (Dx @ Dprev)
+            Dz.append(Dprev.copy(order='C'))
+
+        self.zg = z
+        self._d  = Dz
+
+        # Store corresponding finite-domain Chebyshev-Gauss nodes (in x-space)
+        # and barycentric weights for Chebyshev-Gauss nodes for interpolation.
+        self._xg = x.copy()
+        self._bw = λ.copy()
 
         self.finalize_derivatives()
 
@@ -102,32 +121,57 @@ class ChebyshevRationalGrid(Grid):
         for callback in self._observers:
             callback()
 
-    def to_coefficients(self, f):
-        from numpy.polynomial.chebyshev import chebfit
-        import numpy as np
-
-        # Convert infinite grid to xg = [-1, 1]
-        xg = self.zg / np.sqrt(self.C ** 2 + self.zg ** 2)
-
-        # Get coefficients for standard Chebyshev polynomials
-        c, res = chebfit(xg, f, deg=self.N, full=True)
-
-        return c
-
     def interpolate(self, z, f):
-        """See equations 17.37 and 17.38 in Boyd"""
-        from numpy.polynomial.chebyshev import chebval
+        """
+        Robust interpolation using barycentric formula on Chebyshev–Gauss nodes.
+
+        Parameters
+        ----------
+        z : float or array-like
+            Points in physical (infinite) coordinate where to interpolate.
+        f : array-like
+            Function values sampled on self.zg (length self.NN).
+
+        Returns
+        -------
+        p : float or ndarray
+            Interpolated values at z.
+        """
         import numpy as np
+
+        z = np.asarray(z, dtype=float)
+        f = np.asarray(f)
+
+        if f.shape[0] != self.NN:
+            raise ValueError("f must have shape (self.NN,)")
 
         msg = "Can't interpolate outside grid domain"
-        assert np.array([z]).min() >= self.zmin, msg
-        assert np.array([z]).max() <= self.zmax, msg
+        if z.min() < self.zmin or z.max() > self.zmax:
+            raise ValueError(msg)
 
-        # Get coefficients for standard Chebyshev polynomials
-        c = self.to_coefficients(f)
+        # Map query points to x in [-1, 1]
+        C = float(self.C)
+        x = z / np.sqrt(C * C + z * z)
 
-        # Convert infinite grid to xg = [-1, 1]
-        x = z / np.sqrt(self.C ** 2 + z ** 2)
+        # Nodes and weights in x-space
+        xg = self._xg
+        w  = self._bw
 
-        # Evaluate the Chebyshev polynomial
-        return chebval(x, c)
+        # Vectorized barycentric interpolation
+        # Handle exact/near-exact node hits robustly to avoid division by zero.
+        x_flat = x.ravel()
+        out = np.empty_like(x_flat, dtype=np.result_type(f, x_flat))
+
+        # Tolerance for "hit a node" in x-space; scale with machine precision
+        tol = 50 * np.finfo(float).eps
+
+        for k, xv in enumerate(x_flat):
+            diff = xv - xg
+            jhit = np.where(np.abs(diff) <= tol)[0]
+            if jhit.size:
+                out[k] = f[jhit[0]]
+            else:
+                tmp = w / diff
+                out[k] = (tmp @ f) / tmp.sum()
+
+        return out.reshape(x.shape)
