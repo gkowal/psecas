@@ -112,7 +112,7 @@ class Solver:
         return Σ, V
 
 
-    def solve_mode(self, guess, useOPinv=True, verbose=False, refine=True):
+    def solve_mode(self, guess, v0=None, useOPinv=True, verbose=False, refine=True):
         """
         Construct and solve the (generalized) eigenvalue problem (EVP)
 
@@ -200,9 +200,9 @@ class Solver:
 
                 OPinv = LinearOperator((n, n), matvec=lu.solve, dtype=A.dtype)
 
-                Σ, V = eigs(A, M=B, sigma=sigma0, k=1, OPinv=OPinv)
+                Σ, V = eigs(A, M=B, sigma=sigma0, v0=v0, k=1, OPinv=OPinv)
             else:
-                Σ, V = eigs(A, M=B, sigma=sigma0, k=1)
+                Σ, V = eigs(A, M=B, sigma=sigma0, v0=v0, k=1)
 
         else:
             if useOPinv:
@@ -213,9 +213,9 @@ class Solver:
 
                 OPinv = LinearOperator((n, n), matvec=lu.solve, dtype=A.dtype)
 
-                Σ, V = eigs(A, sigma=sigma0, k=1, OPinv=OPinv)
+                Σ, V = eigs(A, sigma=sigma0, v0=v0, k=1, OPinv=OPinv)
             else:
-                Σ, V = eigs(A, sigma=sigma0, k=1)
+                Σ, V = eigs(A, sigma=sigma0, v0=v0, k=1)
 
         if refine:
             for m in range(Σ.size):
@@ -302,11 +302,85 @@ class Solver:
         return Σ_f, V_f
 
 
+    def eigenvector_to_fields(self, vec, grid):
+        """
+        Unpack eigenvector into dict(var -> field profile on grid nodes).
+        Returns profiles with length grid.NN.
+        """
+        import numpy as np
+
+        N = grid.N
+        NN = grid.NN
+
+        trimmed = all(self.system.boundaries) and (not self.do_gen_evp)
+
+        fields = {}
+        for j, var in enumerate(self.system.variables):
+            if trimmed:
+                interior = vec[j*(N-1):(j+1)*(N-1)]
+                f = np.hstack([0.0, interior, 0.0])
+            else:
+                f = vec[j*NN:(j+1)*NN]
+            fields[var] = f
+
+        return fields
+
+
+    def fields_to_eigenvector(self, fields, grid):
+        """
+        Pack dict(var -> field profile on grid nodes) into eigenvector format
+        appropriate for the solver on this grid.
+        """
+        import numpy as np
+
+        N = grid.N
+        NN = grid.NN
+
+        trimmed = all(self.system.boundaries) and (not self.do_gen_evp)
+
+        chunks = []
+        for var in self.system.variables:
+            f = np.asarray(fields[var])
+            if f.shape[0] != NN:
+                raise ValueError(f"{var}: expected length {NN}, got {f.shape[0]}")
+
+            if trimmed:
+                # drop boundary nodes; solver expects interior only
+                chunks.append(f[1:-1])
+            else:
+                chunks.append(f)
+
+        return np.concatenate(chunks)
+
+
+    def prolongate_eigenvector(self, V_old, grid_old):
+        """
+        Convert prev_vec on prev_grid into a new eigenvector guess on new_grid
+        by unpacking -> interpolating -> repacking.
+        """
+        import numpy as np
+
+        # 1) unpack old vector into old-grid profiles (length prev_grid.NN)
+        fields_old = self.eigenvector_to_fields(V_old, grid_old)
+
+        # 2) interpolate each variable profile to new resolution (new_grid.N)
+        fields_new = {}
+        for var, f_old in fields_old.items():
+            f_new = grid_old.interpolate(self.grid.zg[1:-1], f_old)
+            fields_new[var] = np.pad(f_new, pad_width=1, mode='constant',
+                                     constant_values=(f_old[0], f_old[-1]))
+
+        # 3) repack into a vector consistent with the *new* solver packing
+        V_new = self.fields_to_eigenvector(fields_new, self.grid)
+
+        return V_new
+
+
     def iterate_solve_multimode(self, Ns, maxmode=None, allmodes=False,
                        rtol=1e-6, atol=1e-14, gtol=1e-2,
                        orderby='tolerance', metric="real",
                        re_range=None, im_range=None,
-                       useOPinv=True, verbose=False):
+                       useOPinv=True, useEVguess=True, verbose=False):
         """
         Iteratively solve the eigenvalue problem over a sequence of
         increasing grid resolutions using a multimode, hybrid strategy.
@@ -373,6 +447,10 @@ class Solver:
             If True, use an explicit shift-invert operator when performing
             single-mode solves.
 
+        useEVguess : bool
+            If True, pass an initial eigenvector guess to solve_mode(),
+            interpolated from a lower-resolution grid.
+
         verbose : bool
             If True, print detailed information about solver progress,
             convergence status, and strategy switching.
@@ -389,6 +467,7 @@ class Solver:
             Final convergence error estimate for the selected mode.
         """
         import numpy as np
+        import copy
 
         def _print_modes(Σ, N, errors=None, case=None, delta=None, error=None):
             n = Σ.size
@@ -473,6 +552,7 @@ class Solver:
         self.grid.N = Ns[0]
         Σ, V = self.solve_full()
         Σ_old, V_old = self.filter_modes(Σ, V, re_range=re_range, im_range=im_range)
+        grid_old = copy.deepcopy(self.grid)
         if verbose:
             if orderby in ['real_part', 'real']:
                 index = np.argsort(Σ_old.real)[::-1]
@@ -498,7 +578,11 @@ class Solver:
                 V = []
                 for i in range(modes):
                     σ0 = Σ_old[i]
-                    σ, v = self.solve_mode(σ0, useOPinv=useOPinv, verbose=verbose)
+                    if useEVguess:
+                        v0 = self.prolongate_eigenvector(V_old[:,i], grid_old)
+                    else:
+                        v0 = None
+                    σ, v = self.solve_mode(σ0, v0=v0, useOPinv=useOPinv, verbose=verbose)
                     Σ.append(σ)
                     V.append(v)
                 Σ = np.array(Σ)
@@ -528,8 +612,9 @@ class Solver:
                     return Σ_new[:modes], V_new[:, :modes], errors[:modes]
                 return Σ_new[mode], V_new[:,mode], errors[mode]
 
-            Σ_old = np.copy(Σ_new)
-            V_old = np.copy(V_new)
+            Σ_old = Σ_new.copy()
+            V_old = V_new.copy()
+            grid_old = copy.deepcopy(self.grid)
 
         self.keep_result(Σ_old[mode], V_old[:,mode], mode)
         self.system.result.update({"converged": False})
