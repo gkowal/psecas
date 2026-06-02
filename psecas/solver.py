@@ -378,7 +378,7 @@ class Solver:
 
     def iterate_solve_multimode(self, Ns, maxmode=None, allmodes=False,
                        rtol=1e-6, atol=1e-14, gtol=1e-2,
-                       orderby='tolerance', metric="real",
+                       orderby='tolerance', metric="complex",
                        re_range=None, im_range=None,
                        useOPinv=True, useEVguess=True, verbose=False):
         """
@@ -588,7 +588,14 @@ class Solver:
                 Σ = np.array(Σ)
                 V = np.array(V).T
 
-            Σ_new, V_new = self.filter_modes(Σ, V, re_range=re_range, im_range=im_range)
+            try:
+                Σ_new, V_new = self.filter_modes(Σ, V, re_range=re_range, im_range=im_range)
+            except ValueError:
+                # Fast solver found no eigenmodes in the specified range.
+                # Fall back to full solve to recover the spectrum.
+                case = ' [guess failed → full]'
+                Σ, V = self.solve_full()
+                Σ_new, V_new = self.filter_modes(Σ, V, re_range=re_range, im_range=im_range)
 
             errors, deltas, index = _errors(Σ_new, Σ_old, rtol=rtol, atol=atol, metric=metric, orderby=orderby)
 
