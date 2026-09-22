@@ -510,20 +510,45 @@ class Solver:
 
     def prolongate_eigenvector(self, V_old, grid_old):
         """
-        Convert prev_vec on prev_grid into a new eigenvector guess on new_grid
-        by unpacking -> interpolating -> repacking.
+        Interpolate an eigenvector from a coarser grid onto self.grid, to be
+        used as a starting guess for a solve at the new resolution.
+
+        Unpacks the vector into per-variable profiles, interpolates each one
+        onto the new nodes, and repacks it in the new grid's layout.
         """
         import numpy as np
 
-        # 1) unpack old vector into old-grid profiles (length prev_grid.NN)
+        # 1) unpack old vector into old-grid profiles (length grid_old.NN)
         fields_old = self.eigenvector_to_fields(V_old, grid_old)
 
-        # 2) interpolate each variable profile to new resolution (new_grid.N)
+        # 2) interpolate each variable profile onto the new nodes.
+        #
+        # Interpolate at *every* new node, not the interior ones only. The
+        # previous version interpolated at self.grid.zg[1:-1] and filled the
+        # two ends with the old grid's end values, which is right only when
+        # those values are zero (all-Dirichlet) or when the end nodes sit at
+        # fixed physical positions. On a periodic or infinite grid the node
+        # positions move with N, and the ends came out wrong - for a Fourier
+        # grid refined 32 -> 64 the interior was accurate to 7e-16 while both
+        # endpoints were off by a factor of two.
+        #
+        # Query points are clipped into the old grid's range because the
+        # extent of an infinite grid (rational Chebyshev, sinc, Hermite,
+        # Laguerre) grows with N, so the new outermost nodes can lie beyond
+        # anything the old grid can interpolate.
+        z_new = np.asarray(self.grid.zg)
+        z_query = np.clip(z_new.real, grid_old.zmin, grid_old.zmax)
+
         fields_new = {}
         for var, f_old in fields_old.items():
-            f_new = grid_old.interpolate(self.grid.zg[1:-1], f_old)
-            fields_new[var] = np.pad(f_new, pad_width=1, mode='constant',
-                                     constant_values=(f_old[0], f_old[-1]))
+            f_old = np.asarray(f_old)
+            if np.iscomplexobj(f_old):
+                # Interpolators are real-valued; do the parts separately.
+                f_new = (grid_old.interpolate(z_query, f_old.real)
+                         + 1j * grid_old.interpolate(z_query, f_old.imag))
+            else:
+                f_new = grid_old.interpolate(z_query, f_old)
+            fields_new[var] = np.asarray(f_new).reshape(-1)
 
         # 3) repack into a vector consistent with the *new* solver packing
         V_new = self.fields_to_eigenvector(fields_new, self.grid)
