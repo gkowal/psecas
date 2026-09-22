@@ -1,4 +1,4 @@
-from .solver import Solver
+from .solver import Solver, ShiftInvertError
 from psecas.grids import *
 from .plotting import plot_solution, get_2Dmap, get_2D_cylindrical_map
 from .mpi_io import IO

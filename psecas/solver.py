@@ -1,5 +1,78 @@
+class ShiftInvertError(RuntimeError):
+    """
+    Raised when a shift-invert solve returns an eigenpair that fails its
+    residual check.
+
+    Drivers that are able to fall back to a full spectral solve should catch
+    this exception; it is deliberately *not* a silent failure, because an
+    unverified shift-invert result can look converged while being wrong.
+
+    Attributes
+    ----------
+    sigma : complex or None
+        The rejected eigenvalue.
+    residual : float or None
+        The relative residual that triggered the rejection.
+    """
+
+    def __init__(self, message, sigma=None, residual=None):
+        super().__init__(message)
+        self.sigma = sigma
+        self.residual = residual
+
+
+def _rel_residual(A, B, σ, v):
+    """
+    Relative residual of the eigenpair (σ, v) for the pencil (A, B):
+
+        ‖Av - σBv‖ / (‖Av‖ + |σ|‖Bv‖)
+
+    B may be None, meaning the identity.  Returns np.inf if the normalisation
+    vanishes, so that a degenerate result never passes a tolerance test.
+    """
+    import numpy as np
+
+    Av = A @ v
+    Bv = v if B is None else B @ v
+
+    denom = np.linalg.norm(Av) + abs(σ) * np.linalg.norm(Bv)
+    if not np.isfinite(denom) or denom == 0.0:
+        return np.inf
+
+    return np.linalg.norm(Av - σ * Bv) / denom
+
+
 class Solver:
-    """docstring for Solver"""
+    """
+    Assemble and solve the (generalized) eigenvalue problem defined by a
+    System on a Grid.
+
+        M₁ v = σ M₂ v
+
+    M₁ is built from the right-hand sides of the system's equations and M₂
+    from their left-hand sides.  When M₂ is the identity -- which is the case
+    when no boundary conditions are imposed and the eigenvalue appears alone
+    on each left-hand side -- the problem reduces to a standard EVP and is
+    solved as such.
+
+    Parameters
+    ----------
+    grid : Grid
+        The grid the problem is discretized on.
+    system : System
+        Holds the linearized equations, the background state and the
+        parameters.
+    do_gen_evp : bool (default False)
+        Force the generalized formulation even when a standard EVP would do.
+
+    Main entry points
+    -----------------
+    solve                   Full dense solve, sorted, one mode returned.
+    solve_full              Full dense solve, unsorted, no side effects.
+    solve_mode              Shift-invert solve for a single mode near a guess.
+    iterate_solver          Resolution sweep for a single mode.
+    iterate_solve_multimode Resolution sweep tracking several modes.
+    """
 
     def __init__(self, grid, system, do_gen_evp=False):
         import numpy as np
@@ -112,45 +185,68 @@ class Solver:
         return Σ, V
 
 
-    def solve_mode(self, guess, v0=None, useOPinv=True, verbose=False, refine=True):
+    def solve_mode(self, guess, v0=None, useOPinv=True, verbose=False,
+                   refine=True, residual_tol=1e-6):
         """
-        Construct and solve the (generalized) eigenvalue problem (EVP)
+        Find the single eigenpair of the (generalized) eigenvalue problem
 
             M₁ v = σ M₂ v
 
-        generated with the grid and parameters contained in the system object.
+        whose eigenvalue lies closest to ``guess``, using shift-invert
+        iteration.
 
-        Here σ is the eigenvalue and v is the eigenmode.
-        Note that M₂ is a diagonal matrix if no boundary conditions are set.
-        In that case the EVP is simply
+        Here σ is the eigenvalue and v is the eigenmode.  When no boundary
+        conditions are set M₂ is the identity and the problem reduces to
 
             M₁ v = σ v
 
-        This method stores a dictionary with the result of the calculation
-        in self.system.result.
+        Returns
+        -------
+        σ : complex
+            The eigenvalue closest to ``guess``.
+        v : ndarray
+            The corresponding eigenvector.
 
-        Returns: One eigenvalue and its eigenvector.
+        Parameters
+        ----------
+        guess : complex
+            Shift for the shift-invert iteration.  The eigenvalue nearest to
+            this value is returned.
 
-        guess: Scipy's eigs method is used to find a
-        single eigenvalue in the proximity of the guess.
+        v0 : ndarray or None
+            Optional starting vector for the Arnoldi iteration.
 
-        Optional parameters
+        useOPinv : bool (default True)
+            Standard EVP only: if True, factorize (M₁ - σI) explicitly instead
+            of letting ``eigs`` do it.  Ignored for the generalized EVP, which
+            always uses an explicitly constructed shift-invert operator (see
+            the implementation notes below).
 
-        useOPinv (default True): If true, manually calculate OPinv instead of
-        letting eigs do it.
+        verbose : bool (default False)
+            Print the eigenvalue and its relative residual.
 
-        verbose (default False): print out information about the calculation.
+        refine : bool (default True)
+            Refine the returned eigenvector with fixed-σ inverse iteration.
 
-        refine : bool
-            If True, refine returned eigenvectors using fixed-σ inverse iteration.
+        residual_tol : float or None (default 1e-6)
+            Reject the result if the relative residual
+
+                ‖M₁v - σM₂v‖ / (‖M₁v‖ + |σ|‖M₂v‖)
+
+            exceeds this value, by raising :class:`ShiftInvertError`.  Pass
+            None to skip the check.  Callers that can fall back to a full
+            solve should catch that exception rather than trusting an
+            unverified eigenvalue.
+
+        Raises
+        ------
+        ShiftInvertError
+            If the residual check fails.  The offending eigenvalue and
+            residual are attached to the exception.
         """
         import numpy as np
         import scipy.sparse as sp
         from scipy.sparse.linalg import eigs, splu, LinearOperator
-
-        def rel_residual(A, B, σ, v):
-            r = A @ v - σ * (B @ v)
-            return np.linalg.norm(r) / (np.linalg.norm(A @ v) + abs(σ) * np.linalg.norm(B @ v))
 
         def refine_eigenvector(A, σ, v, B=None, nsteps=10, rtol=1e-3):
             """
@@ -161,28 +257,29 @@ class Solver:
 
             Factors (A - σ B) once since sigma is fixed.
             """
-            A = A.tocsc()
             n = A.shape[0]
-
             if B is None:
                 B = sp.eye(n, format="csc", dtype=A.dtype)
-            else:
-                B = B.tocsc()
 
-            K = (A - σ * B).tocsc()
-            lu = splu(K)
+            lu = splu((A - σ * B).tocsc())
 
+            ε = _rel_residual(A, B, σ, v)
             for _ in range(nsteps):
                 w  = lu.solve(B @ v)
                 w /= np.linalg.norm(w)
-                v  = w
-                ε  = rel_residual(A, B, σ, v)
+                ε_new = _rel_residual(A, B, σ, w)
+                # Keep the refined vector only while it actually improves the
+                # residual; inverse iteration can stagnate or drift once the
+                # attainable accuracy has been reached.
+                if ε_new >= ε:
+                    break
+                v, ε = w, ε_new
                 if ε < rtol:
                     break
 
             return v, ε
 
-        sigma0 = guess
+        sigma0 = complex(guess)
 
         self.get_matrix1()
         A = self.mat1.tocsc()
@@ -193,16 +290,35 @@ class Solver:
             B = None
 
         if self.do_gen_evp:
-            if useOPinv:
-                n  = A.shape[0]
-                K  = (A - sigma0 * B).tocsc()
-                lu = splu(K)
+            # Shift-invert for the matrix pencil (A, B).
+            #
+            # scipy's eigs(A, M=B, sigma=...) interface requires B to be
+            # symmetric positive definite.  Psecas' M₂ never satisfies this
+            # once boundary conditions are present: get_matrix2() zeroes whole
+            # rows so that the boundary equations do not depend on the
+            # eigenvalue, which makes B singular, and physical terms on the
+            # left-hand side can make it indefinite or non-symmetric.  Handing
+            # such a B to ARPACK invalidates its convergence test: it returns
+            # after essentially one iteration with an "eigenvalue" that merely
+            # tracks the shift, so a driver that measures convergence by
+            # comparing successive eigenvalues sees false convergence.
+            #
+            # We therefore construct the shift-invert operator ourselves and
+            # pass it to eigs() in *regular* mode, where no assumption about B
+            # is made:
+            #
+            #     OP = (A - σ₀B)⁻¹B ,   OP v = 1/(σ - σ₀) v
+            #
+            # The eigenvalue of OP with largest magnitude is the one belonging
+            # to the σ closest to σ₀, and σ = σ₀ + 1/θ recovers it.
+            n  = A.shape[0]
+            lu = splu((A - sigma0 * B).tocsc())
 
-                OPinv = LinearOperator((n, n), matvec=lu.solve, dtype=A.dtype)
+            OP = LinearOperator((n, n), matvec=lambda x: lu.solve(B @ x),
+                                dtype=np.complex128)
 
-                Σ, V = eigs(A, M=B, sigma=sigma0, v0=v0, k=1, OPinv=OPinv)
-            else:
-                Σ, V = eigs(A, M=B, sigma=sigma0, v0=v0, k=1)
+            Θ, V = eigs(OP, k=1, v0=v0, which='LM')
+            Σ = sigma0 + 1.0 / Θ
 
         else:
             if useOPinv:
@@ -219,11 +335,32 @@ class Solver:
 
         if refine:
             for m in range(Σ.size):
-                v, r = refine_eigenvector(A, Σ[m], V[:,m], B=B)
-                V[:,m] = v
+                v, r = refine_eigenvector(A, Σ[m], V[:, m], B=B)
+                V[:, m] = v
 
         σ = Σ[0]
-        v = V[:,0]
+        v = V[:, 0]
+
+        # Verify the result.  Shift-invert can fail silently -- this is the
+        # only thing standing between a bad factorization and a wrong
+        # scientific result, so it is checked by default.
+        residual = _rel_residual(A, B, σ, v)
+        self.residual = residual
+
+        if verbose:
+            print("N: {}, sigma: {}, residual: {:.3e}".format(
+                self.grid.N, σ, residual))
+
+        if residual_tol is not None and not (residual <= residual_tol):
+            raise ShiftInvertError(
+                "solve_mode(): shift-invert did not converge. Relative "
+                "residual {:.3e} exceeds residual_tol={:.3e} for the "
+                "eigenvalue {} found near the guess {}. The result has been "
+                "rejected rather than returned; retry with a better guess, "
+                "relax residual_tol, or use solve_full()."
+                .format(residual, residual_tol, σ, sigma0),
+                sigma=σ, residual=residual,
+            )
 
         return σ, v
 
@@ -379,8 +516,9 @@ class Solver:
     def iterate_solve_multimode(self, Ns, maxmode=None, allmodes=False,
                        rtol=1e-6, atol=1e-14, gtol=1e-2,
                        orderby='tolerance', metric="complex",
-                       re_range=None, im_range=None,
-                       useOPinv=True, useEVguess=True, verbose=False):
+                       re_range=None, im_range=None, require_re_positive=True,
+                       useOPinv=True, useEVguess=True, verbose=False,
+                       residual_tol=1e-6):
         """
         Iteratively solve the eigenvalue problem over a sequence of
         increasing grid resolutions using a multimode, hybrid strategy.
@@ -443,6 +581,14 @@ class Solver:
             Optional bounds on the imaginary part of the eigenvalues
             used for filtering. Use None for open bounds.
 
+        require_re_positive : bool
+            If True (the default), discard every eigenvalue with
+            Re(σ) <= 0, i.e. track growing modes only. Set to False to
+            follow damped or purely oscillatory modes as well; note that
+            'tolerance' ordering is then the meaningful choice, since the
+            growth-rate weighting used for the strategy switch assumes a
+            positive real part.
+
         useOPinv : bool
             If True, use an explicit shift-invert operator when performing
             single-mode solves.
@@ -454,6 +600,13 @@ class Solver:
         verbose : bool
             If True, print detailed information about solver progress,
             convergence status, and strategy switching.
+
+        residual_tol : float or None
+            Relative-residual tolerance applied to every single-mode
+            shift-invert solve. A mode that fails the check is discarded
+            and the whole spectrum is recomputed with a full solve for
+            that resolution. Pass None to disable the check (not
+            recommended).
 
         Returns
         -------
@@ -551,7 +704,9 @@ class Solver:
 
         self.grid.N = Ns[0]
         Σ, V = self.solve_full()
-        Σ_old, V_old = self.filter_modes(Σ, V, re_range=re_range, im_range=im_range)
+        Σ_old, V_old = self.filter_modes(
+            Σ, V, re_range=re_range, im_range=im_range,
+            require_re_positive=require_re_positive)
         grid_old = copy.deepcopy(self.grid)
         if verbose:
             if orderby in ['real_part', 'real']:
@@ -574,28 +729,44 @@ class Solver:
                 Σ, V = self.solve_full()
             else:
                 case = ' [with guess]'
-                Σ = []
-                V = []
-                for i in range(modes):
-                    σ0 = Σ_old[i]
-                    if useEVguess:
-                        v0 = self.prolongate_eigenvector(V_old[:,i], grid_old)
-                    else:
-                        v0 = None
-                    σ, v = self.solve_mode(σ0, v0=v0, useOPinv=useOPinv, verbose=verbose)
-                    Σ.append(σ)
-                    V.append(v)
-                Σ = np.array(Σ)
-                V = np.array(V).T
+                try:
+                    Σ = []
+                    V = []
+                    for i in range(modes):
+                        σ0 = Σ_old[i]
+                        if useEVguess:
+                            v0 = self.prolongate_eigenvector(V_old[:,i], grid_old)
+                        else:
+                            v0 = None
+                        σ, v = self.solve_mode(σ0, v0=v0, useOPinv=useOPinv,
+                                                verbose=verbose,
+                                                residual_tol=residual_tol)
+                        Σ.append(σ)
+                        V.append(v)
+                    Σ = np.array(Σ)
+                    V = np.array(V).T
+                except ShiftInvertError:
+                    # A shift-invert solve produced an eigenpair that failed
+                    # its residual check. Never accept it: recover the whole
+                    # spectrum with a full solve instead. Doing otherwise
+                    # would let the driver "converge" on a wrong eigenvalue,
+                    # since the rejected result tends to sit near the guess
+                    # it was given.
+                    case = ' [guess rejected → full]'
+                    Σ, V = self.solve_full()
 
             try:
-                Σ_new, V_new = self.filter_modes(Σ, V, re_range=re_range, im_range=im_range)
+                Σ_new, V_new = self.filter_modes(
+                    Σ, V, re_range=re_range, im_range=im_range,
+                    require_re_positive=require_re_positive)
             except ValueError:
                 # Fast solver found no eigenmodes in the specified range.
                 # Fall back to full solve to recover the spectrum.
                 case = ' [guess failed → full]'
                 Σ, V = self.solve_full()
-                Σ_new, V_new = self.filter_modes(Σ, V, re_range=re_range, im_range=im_range)
+                Σ_new, V_new = self.filter_modes(
+                    Σ, V, re_range=re_range, im_range=im_range,
+                    require_re_positive=require_re_positive)
 
             errors, deltas, index = _errors(Σ_new, Σ_old, rtol=rtol, atol=atol, metric=metric, orderby=orderby)
 
