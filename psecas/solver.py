@@ -745,6 +745,13 @@ class Solver:
             return m, k
 
 
+        Ns = list(Ns)
+        if len(Ns) < 1:
+            raise ValueError(
+                "iterate_solve_multimode() needs at least one resolution in "
+                "Ns, got an empty sequence."
+            )
+
         self.grid.N = Ns[0]
         Σ, V = self.solve_full()
         Σ_old, V_old = self.filter_modes(
@@ -764,6 +771,11 @@ class Solver:
 
         error = np.inf
         delta = np.inf
+        # With a single resolution there is nothing to compare against, so no
+        # error can be estimated. Initialising here rather than inside the
+        # loop keeps the return statements below well defined; leaving it
+        # unbound raised UnboundLocalError for len(Ns) == 1.
+        errors = np.full(Σ_old.size, np.inf)
 
         for N in Ns[1:]:
             self.grid.N = N
@@ -1015,6 +1027,14 @@ class Solver:
         with a full solve. Pass None to disable the check (not recommended).
         """
         import numpy as np
+
+        Ns = list(Ns)
+        if len(Ns) < 2:
+            raise ValueError(
+                "iterate_solver() compares consecutive resolutions and so "
+                "needs at least two entries in Ns, got {}. Use solve() for a "
+                "single resolution.".format(Ns)
+            )
 
         self.grid.N = Ns[0]
         (sigma_old, v) = self.solve(mode=mode, verbose=verbose)
