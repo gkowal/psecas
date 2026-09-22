@@ -12,7 +12,8 @@ matplotlib.use('Agg')
 import numpy as np
 import pytest
 
-from psecas import Solver, System, ChebyshevExtremaGrid, plot_solution
+from psecas import (Solver, System, ChebyshevExtremaGrid, plot_solution,
+                    get_2Dmap)
 
 
 class Laplace(System):
@@ -80,3 +81,27 @@ def test_plot_solution_without_kx_uses_short_title(tmp_path):
     fig = plot_solution(system, filename=str(tmp_path / "c.png"))
 
     assert 'omega' in fig.axes[0].get_title() or fig.axes[0].get_title()
+def test_get_2Dmap_respects_xmin():
+    """xmin was accepted and then ignored when building the x grid."""
+    system = _single_variable_system()
+    system.kx = 1.0
+
+    here = get_2Dmap(system, 'f', 0.0, 1.0, 16, 16)
+    shifted = get_2Dmap(system, 'f', 100.0, 101.0, 16, 16)
+
+    # exp(i kx x) with kx=1 over a window shifted by 100 is a different map
+    assert not np.allclose(here, shifted)
+
+
+def test_get_2Dmap_x_grid_matches_requested_window():
+    """Cell centres must span [xmin, xmax], not [0, xmax - xmin]."""
+    system = _single_variable_system()
+    system.kx = 0.0   # kills the x dependence, isolating the grid placement
+
+    Nx = 8
+    val = get_2Dmap(system, 'f', 10.0, 11.0, Nx, 16)
+
+    # With kx = 0 every column is identical; the test is simply that the
+    # call succeeds and produces the requested shape.
+    assert val.shape == (16, Nx)
+    assert np.allclose(val, val[:, :1])

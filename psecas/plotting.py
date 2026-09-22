@@ -77,7 +77,9 @@ def get_2Dmap(system, var, xmin, xmax, Nx, Nz, zmin=None, zmax=None, time=0):
     import numpy as np
 
     dx = (xmax - xmin) / Nx
-    xg = (0.5 + np.arange(Nx)) * dx
+    # + xmin: the cell centres must span [xmin, xmax]. Without it the map was
+    # always built over [0, xmax - xmin] and xmin was silently ignored.
+    xg = (0.5 + np.arange(Nx)) * dx + xmin
 
     if zmin is None or zmax is None:
         zmin = system.grid.zmin
@@ -123,11 +125,14 @@ def get_2D_cylindrical_map_in_cylindrical_coords(
 
     # Create linear grid in phi
     dphi = (phimax - phimin) / (Nphi - 1)
-    phig = (np.arange(Nphi)) * dphi
+    # + phimin, for the same reason as xmin in get_2Dmap()
+    phig = np.arange(Nphi) * dphi + phimin
 
     # Create linear grid in r
     if rmin is None:
         rmin = system.grid.zmin
+    if rmax is None:
+        rmax = system.grid.zmax
     dr = (rmax - rmin) / Nr
     rg = (0.5 + np.arange(Nr)) * dr + rmin
 
@@ -200,9 +205,13 @@ def get_2D_cylindrical_map(
         yi = system.grid.interpolate(rg, var.imag)
     y = yr + 1j * yi
 
-    val = np.resize(y, (Nx, Ny))
-    val = (2*val*np.exp(1j*kz*z + 1j*m*phiphi + system.result[system.eigenvalue]*time)).real
-    # for i in range(Nphi):
-    #     val[i, :] = return_real_ampl(y, phig[i])
+    # np.meshgrid(x, y) with len(x)=Nx, len(y)=Ny produces arrays of shape
+    # (Ny, Nx), so the interpolated values must be folded back to rr.shape.
+    # The previous np.resize(y, (Nx, Ny)) transposed the map and, being
+    # resize rather than reshape, would have tiled or truncated silently
+    # instead of failing whenever Nx != Ny.
+    val = y.reshape(rr.shape)
+    val = (2*val*np.exp(1j*kz*z + 1j*m*phiphi
+                        + system.result[system.eigenvalue]*time)).real
 
     return (xx, yy, val)
