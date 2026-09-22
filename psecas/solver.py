@@ -21,6 +21,19 @@ class ShiftInvertError(RuntimeError):
         self.residual = residual
 
 
+def _contains_symbol(expr, name):
+    """
+    True if name occurs in expr as a standalone identifier.
+
+    A plain ``name in expr`` would also match inside a longer identifier, so
+    that e.g. looking for the variable 'v' would find it inside 'v_x'.
+    """
+    import re
+
+    pattern = r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])"
+    return re.search(pattern, expr) is not None
+
+
 def _rel_residual(A, B, σ, v):
     """
     Relative residual of the eigenpair (σ, v) for the pencil (A, B):
@@ -1196,6 +1209,41 @@ class Solver:
         return expr
 
 
+    def _expand_substitutions(self, expr, verbose=False):
+        """
+        Apply the system's textual substitutions to expr, repeatedly, until
+        the text stops changing.
+
+        Substitutions are plain text replacement (see System.add_substitution)
+        and may legitimately be defined in terms of one another, so a single
+        pass is not always enough. A pass limit guards against a substitution
+        that refers to itself.
+        """
+        from .string_methods import var_replace
+
+        substitutions = getattr(self.system, "substitutions", None)
+        if not substitutions:
+            return expr
+
+        max_passes = len(substitutions) + 1
+        for _ in range(max_passes):
+            previous = expr
+            for substitution in substitutions:
+                name, _, value = substitution.partition("=")
+                expr = var_replace(expr, name.strip(), value)
+                if verbose:
+                    print(expr)
+            if expr == previous:
+                return expr
+
+        raise ValueError(
+            "Could not expand the substitutions in\n\n{}\n\n"
+            "after {} passes. This usually means a substitution is defined "
+            "in terms of itself, directly or through another substitution."
+            .format(expr, max_passes)
+        )
+
+
     def _find_submatrices(self, eq, verbose=False):
         import builtins
         import numpy as np
@@ -1213,24 +1261,26 @@ class Solver:
         if verbose:
             print("\nParsing equation:", eq)
 
+        # Expand substitutions ONCE, before anything inspects the equation.
+        #
+        # This must happen before the per-variable fast path below: a variable
+        # can enter an equation only through a substitution (for example
+        # "G = dz(dz(f))" used in "sigma*f = q*G"), in which case the raw
+        # equation text does not mention it. Testing the unexpanded text meant
+        # such a variable was replaced by a zero block, silently producing a
+        # wrong eigenvalue with no error or warning.
+        #
+        # Expanding once rather than once per variable is also cheaper.
+        eq = self._expand_substitutions(eq, verbose)
+
         for i, var in enumerate(self.system.variables):
             # Fast path: variable absent -> sparse zero (no dense zeros)
-            if var not in eq:
+            if not _contains_symbol(eq, var):
                 mats.append(sparse.lil_matrix((NN, NN), dtype=np.complex128))
                 continue
 
             variables_t = list(np.copy(self.system.variables))
-            eq_t = eq
-
-            # Apply equation substitutions
-            if hasattr(self.system, "substitutions"):
-                for substitution in self.system.substitutions:
-                    sub_split = substitution.split("=")
-                    eq_t = var_replace(eq_t, sub_split[0].strip(), sub_split[1])
-                    if verbose:
-                        print(eq_t)
-
-            eq_t = self._rewrite_derivatives(eq_t, grid, var)
+            eq_t = self._rewrite_derivatives(eq, grid, var)
 
             variables_t.remove(var)
             for var2 in variables_t:
@@ -1329,11 +1379,9 @@ class Solver:
                             var = self.system.variables[var_n-1]
                             bound_t = bound.split("=")[0]
 
-                            # Apply equation substitutions
-                            if hasattr(self.system, 'substitutions'):
-                                for substitution in self.system.substitutions:
-                                    sub_split = substitution.split('=')
-                                    bound_t = var_replace(bound_t, sub_split[0].strip(), sub_split[1])
+                            # Apply equation substitutions (same expansion
+                            # rules as for the equations themselves)
+                            bound_t = self._expand_substitutions(bound_t)
 
                             mask = np.zeros(self.grid.NN)
                             mask[index] = 1
