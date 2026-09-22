@@ -864,7 +864,8 @@ class Solver:
 
         return (sigma, v)
 
-    def solve_with_guess(self, guess, useOPinv=True, verbose=False, mode=0):
+    def solve_with_guess(self, guess, useOPinv=True, verbose=False, mode=0,
+                         residual_tol=1e-6):
         """
         Construct and solve the (generalized) eigenvalue problem (EVP)
 
@@ -895,6 +896,10 @@ class Solver:
 
         mode (default 0): mode=0 is the fastest growing, mode=1 the second
         fastest and so on.
+
+        residual_tol (default 1e-6): relative-residual tolerance for the
+        returned eigenpair. Raises ShiftInvertError if exceeded. Pass None
+        to disable the check.
         """
         import numpy as np
         from scipy.sparse.linalg import eigs
@@ -905,12 +910,18 @@ class Solver:
         # Solve a generalized EVP
         if self.do_gen_evp:
             self.get_matrix2()
-            if useOPinv:
-                from numpy.linalg import inv
-                OPinv = inv((self.mat1 - guess * self.mat2).toarray())
-                sigma, v = eigs(self.mat1, k=1, sigma=guess, OPinv=OPinv)
-            else:    
-                sigma, v = eigs(self.mat1, M=self.mat2, k=1, sigma=guess)
+            # Delegate to solve_mode(), which builds the correct shift-invert
+            # operator (A - sigma*B)^-1 B for the pencil and verifies the
+            # residual of what it returns.
+            #
+            # The previous implementation here passed OPinv = (A - sigma*B)^-1
+            # to eigs() *without* M=self.mat2, so an operator built for the
+            # pencil was applied to the standard problem and a different mode
+            # came back; and even with M= supplied, eigs() requires M to be
+            # positive definite, which mat2 is not once boundary conditions
+            # zero out rows. See the implementation notes in solve_mode().
+            sigma, v = self.solve_mode(guess, useOPinv=useOPinv,
+                                       residual_tol=residual_tol)
         else:
             if useOPinv:
                 from numpy.linalg import inv
@@ -918,11 +929,10 @@ class Solver:
                 sigma, v = eigs(self.mat1, k=1, sigma=guess, OPinv=OPinv)
             else:
                 sigma, v = eigs(self.mat1, k=1, sigma=guess)
-                
 
-        # Convert result from eigs to have same format as result from eig
-        sigma = sigma[0]
-        v = np.squeeze(v)
+            # Convert result from eigs to have same format as result from eig
+            sigma = sigma[0]
+            v = np.squeeze(v)
 
         if verbose:
             print("N:{}, only 1 eigenvalue:{}".format(self.grid.N, sigma))
@@ -933,7 +943,7 @@ class Solver:
 
     def iterate_solver(
         self, Ns, mode=0, tol=1e-6, atol=1e-16, verbose=False, guess_tol=0.01,
-        useOPinv=True
+        useOPinv=True, residual_tol=1e-6
     ):
         """
         Iteratively call the solve method with increasing grid resolution, N.
@@ -956,6 +966,10 @@ class Solver:
         that the guess used is a good guess. If guess_tol=0.1 the method will
         start using guesses when the relative difference to the previous
         iteration is 10 %.
+
+        residual_tol: relative-residual tolerance for guess-based solves. A
+        mode that fails the check is discarded and that resolution is redone
+        with a full solve. Pass None to disable the check (not recommended).
         """
         import numpy as np
 
@@ -973,9 +987,17 @@ class Solver:
                 (sigma_new, v) = self.solve(mode=mode, verbose=verbose)
             # Use guess from previous iteration
             else:
-                (sigma_new, v) = self.solve_with_guess(
-                    sigma_old, mode=mode, verbose=verbose, useOPinv=useOPinv
-                )
+                try:
+                    (sigma_new, v) = self.solve_with_guess(
+                        sigma_old, mode=mode, verbose=verbose,
+                        useOPinv=useOPinv, residual_tol=residual_tol
+                    )
+                except ShiftInvertError:
+                    # The cheap guess-based solve produced an eigenpair that
+                    # failed its residual check. Fall back to the full solve
+                    # rather than accepting it: a rejected shift-invert result
+                    # sits near the guess, which would look like convergence.
+                    (sigma_new, v) = self.solve(mode=mode, verbose=verbose)
 
             a_err = np.abs(sigma_old - sigma_new)
             r_err = a_err / np.abs(sigma_old)
