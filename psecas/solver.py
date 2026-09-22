@@ -110,6 +110,22 @@ class Solver:
             system.extra_binfo = extra_binfo
 
 
+        # Boundary conditions address the first and last grid node. On a
+        # periodic grid those are interior points that happen to sit at the
+        # ends of the array, so imposing conditions there is meaningless.
+        # This used to be accepted silently and quietly deleted a grid point,
+        # yielding eigenvalues for a different, meaningless discretization.
+        if getattr(grid, 'periodic', False) and any(system.boundaries):
+            names = [var for var, has_bc
+                     in zip(system.variables, system.boundaries) if has_bc]
+            raise ValueError(
+                "Boundary conditions were set on {} but {} is periodic, so "
+                "its first and last nodes are not domain boundaries. Either "
+                "drop the boundary conditions or use a non-periodic grid "
+                "such as ChebyshevExtremaGrid."
+                .format(names, type(grid).__name__)
+            )
+
         # Check if we need to solve a generalized evp
         self.check_if_evp_or_gevp(verbose=False)
 
@@ -449,7 +465,6 @@ class Solver:
         """
         import numpy as np
 
-        N = grid.N
         NN = grid.NN
 
         trimmed = all(self.system.boundaries) and (not self.do_gen_evp)
@@ -457,7 +472,8 @@ class Solver:
         fields = {}
         for j, var in enumerate(self.system.variables):
             if trimmed:
-                interior = vec[j*(N-1):(j+1)*(N-1)]
+                n_int = NN - 2
+                interior = vec[j*n_int:(j+1)*n_int]
                 f = np.hstack([0.0, interior, 0.0])
             else:
                 f = vec[j*NN:(j+1)*NN]
@@ -473,7 +489,6 @@ class Solver:
         """
         import numpy as np
 
-        N = grid.N
         NN = grid.NN
 
         trimmed = all(self.system.boundaries) and (not self.do_gen_evp)
@@ -1038,18 +1053,13 @@ class Solver:
 
         # Store result
         if all(self.system.boundaries) and not self.do_gen_evp:
-            # Add zeros at both ends of the solution
+            # The boundary nodes were trimmed out of the matrices, so the
+            # eigenvector holds NN - 2 interior values per variable. Put the
+            # zeros back to get a profile defined on every grid node.
+            interior = self.grid.NN - 2
             self.system.result = {
                 var: np.hstack(
-                    [
-                        0.0,
-                        vec[
-                            j
-                            * (self.grid.N - 1) : (j + 1)
-                            * (self.grid.N - 1)
-                        ],
-                        0.0,
-                    ]
+                    [0.0, vec[j * interior:(j + 1) * interior], 0.0]
                 )
                 for j, var in enumerate(self.system.variables)
             }
@@ -1071,7 +1081,10 @@ class Solver:
         from .string_methods import var_replace
 
         dim = self.system.dim
-        N = self.grid.N
+        # Index of the last grid node. Grids disagree on whether NN is N or
+        # N + 1 (FourierGrid and HermiteGrid use NN = N, everything else
+        # N + 1), so all index arithmetic below is expressed through NN.
+        last = self.grid.NN - 1
         equations = self.system.equations
         boundaries = self.system.boundaries
         extra_binfo = self.system.extra_binfo
@@ -1087,7 +1100,7 @@ class Solver:
         for j in range(dim):
             for i in range(dim):
                 if all((boundaries)) and not self.do_gen_evp:
-                    rows[j][i] = rows[j][i][1:N, 1:N]
+                    rows[j][i] = rows[j][i][1:last, 1:last]
                 elif any(boundaries):
                     rows[j][i] = self._modify_submatrix(rows[j][i],
                                                         j + 1, i + 1,
@@ -1107,7 +1120,7 @@ class Solver:
         from .string_methods import var_replace
 
         dim = self.system.dim
-        N = self.grid.N
+        last = self.grid.NN - 1      # see the note in get_matrix1()
         sys = self.system
         equations = sys.equations
         variables = sys.variables
@@ -1126,7 +1139,7 @@ class Solver:
         for j in range(dim):
             for i in range(dim):
                 if all((boundaries)) and not self.do_gen_evp:
-                    rows[j][i] = rows[j][i][1:N, 1:N]
+                    rows[j][i] = rows[j][i][1:last, 1:last]
                 elif any(boundaries):
                     # In generalized EVP mode, boundary conditions are imposed by
                     # row-replacement in mat1 (A). To keep BC equations independent
@@ -1138,19 +1151,20 @@ class Solver:
                     # only zeroed a single diagonal entry, which can leave
                     # eigenvalue-coupled residual terms in BC rows.
                     if self.do_gen_evp and boundaries[j]:
-                        # Keep index convention consistent with _modify_submatrix():
-                        # boundary nodes are 0 and N (inclusive grid).
+                        # Keep index convention consistent with
+                        # _modify_submatrix(): boundary nodes are the first
+                        # and last grid nodes, 0 and NN - 1.
                         if extra_binfo[j][0] is not None:
                             rows[j][i][0, :] = 0
                         if extra_binfo[j][1] is not None:
-                            rows[j][i][N, :] = 0
+                            rows[j][i][last, :] = 0
                     else:
                         # Backward-compatible behavior for non-generalized EVP:
                         # preserve existing "diagonal-entry zeroing" logic.
                         if extra_binfo[j][0] is not None:
                             rows[j][i][0, 0] = 0
                         if extra_binfo[j][1] is not None:
-                            rows[j][i][N, N] = 0
+                            rows[j][i][last, last] = 0
 
         # Assemble everything
         self.mat2 = sparse.bmat(rows, format='csr')
@@ -1353,9 +1367,9 @@ class Solver:
         env = dict(self.system.__dict__)
         env["grid"] = grid
 
-        N = self.grid.N
+        last = self.grid.NN - 1      # see the note in get_matrix1()
         if boundary:
-            for index, bound in zip([0, N], binfo):
+            for index, bound in zip([0, last], binfo):
                 if bound is not None:
                     submat[index, :] = 0
                     if eq_n == var_n:

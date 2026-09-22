@@ -82,6 +82,11 @@ class Grid:
         finally:
             self.__dict__["_observers"] = observers
 
+    #: Whether the first and last grid nodes are domain boundaries on which
+    #: boundary conditions can be imposed. False for periodic grids, whose
+    #: nodes wrap around and which therefore have no boundary to speak of.
+    periodic = False
+
     @property
     def L(self):
         return self.zmax - self.zmin

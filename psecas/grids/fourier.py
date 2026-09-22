@@ -16,6 +16,10 @@ class FourierGrid(Grid):
 
     """
 
+    # The grid wraps around: there is no first or last node in any meaningful
+    # sense, so boundary conditions cannot be imposed on it.
+    periodic = True
+
     def __init__(self, N, zmin, zmax, z="z", max_derivative_order=2):
         super().__init__(N, zmin, zmax, z=z, max_derivative_order=max_derivative_order)
 
