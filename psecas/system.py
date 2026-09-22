@@ -1,3 +1,6 @@
+from psecas.string_methods import contains_symbol as _contains_symbol
+
+
 class System:
     """
     Dedalus style initialization of an EVP problem.
@@ -35,20 +38,60 @@ class System:
         return len(self.equations)
 
     def add_equation(self, eq, boundary=False):
-        found = False
+        """
+        Register a linearized equation.
+
+        The equation is stored in the slot belonging to the variable that
+        appears on its left-hand side, so exactly one variable must appear
+        there.
+
+        eq:       the equation, e.g. "sigma*f = dz(dz(f))"
+        boundary: if True, impose Dirichlet conditions on this variable at
+                  both ends. Use add_boundary() for anything else.
+        """
+        if '=' not in eq:
+            raise ValueError(
+                "The equation\n\n  {}\n\nhas no equal sign. Equations must "
+                "be written as 'lhs = rhs', with the eigenvalue on the left."
+                .format(eq)
+            )
+
+        lhs = eq.split('=')[0]
+
+        found = None
         for ii, var in enumerate(self.variables):
-            if var in eq.split('=')[0]:
-                if found:
-                    raise RuntimeError('Only one variable may appear on the LHS.')
-                else:
-                    found = True
-                self.equations[ii] = eq
-                if boundary:
-                    self.boundaries[ii] = True
-                    self.extra_binfo[ii] = ['Dirichlet', 'Dirichlet']
-                else:
-                    self.boundaries[ii] = False
-                    self.extra_binfo[ii] = [None, None]
+            # Match whole identifiers only: a substring test would find the
+            # variable 'vx' inside 'dvx' and claim the wrong slot.
+            if _contains_symbol(lhs, var):
+                if found is not None:
+                    raise RuntimeError(
+                        "Only one variable may appear on the LHS, but "
+                        "'{}' and '{}' both appear in\n\n  {}"
+                        .format(self.variables[found], var, lhs)
+                    )
+                found = ii
+
+        if found is None:
+            # Falling through silently used to leave this equation slot as
+            # the empty string, and the failure then surfaced far away as
+            # "IndexError: list index out of range" inside get_matrix1().
+            raise ValueError(
+                "None of the system variables {} appears on the left-hand "
+                "side of\n\n  {}\n\nEvery equation must have exactly one "
+                "variable on its LHS, since that is what decides which "
+                "equation slot it fills. If the variable only enters through "
+                "a substitution, write it out on the LHS."
+                .format(self.variables, eq)
+            )
+
+        ii = found
+        self.equations[ii] = eq
+        if boundary:
+            self.boundaries[ii] = True
+            self.extra_binfo[ii] = ['Dirichlet', 'Dirichlet']
+        else:
+            self.boundaries[ii] = False
+            self.extra_binfo[ii] = [None, None]
 
     def add_boundary(self, var, lower, upper):
         msg = 'Cannot set boundary on {}, as it is not found in system.variables'

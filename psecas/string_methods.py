@@ -22,6 +22,20 @@ def _pattern(var):
     return pattern
 
 
+def contains_symbol(expr, name):
+    """
+    True if name occurs in expr as a standalone identifier.
+
+    A plain ``name in expr`` would also match inside a longer identifier, so
+    that looking for the variable 'v' would find it inside 'v_x' and looking
+    for 'beta' would find it inside 'beta2'.
+    """
+    if not name:
+        return False
+
+    return _pattern(name).search(expr) is not None
+
+
 def var_replace(eq, var, new):
     """
     Replace every standalone occurrence of the identifier var in eq with new.

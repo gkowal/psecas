@@ -1,3 +1,6 @@
+from .string_methods import contains_symbol as _contains_symbol
+
+
 class ShiftInvertError(RuntimeError):
     """
     Raised when a shift-invert solve returns an eigenpair that fails its
@@ -19,19 +22,6 @@ class ShiftInvertError(RuntimeError):
         super().__init__(message)
         self.sigma = sigma
         self.residual = residual
-
-
-def _contains_symbol(expr, name):
-    """
-    True if name occurs in expr as a standalone identifier.
-
-    A plain ``name in expr`` would also match inside a longer identifier, so
-    that e.g. looking for the variable 'v' would find it inside 'v_x'.
-    """
-    import re
-
-    pattern = r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])"
-    return re.search(pattern, expr) is not None
 
 
 def _rel_residual(A, B, σ, v):
