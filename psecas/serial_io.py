@@ -2,11 +2,14 @@ def load_system(filename):
     """Load object containing solution.
     Input: filename, eg 'system.p'
     Output: system object
+
+    Note that this unpickles the file, which executes code contained in it.
+    Only load files you produced yourself or otherwise trust.
     """
     import pickle
 
-    system = pickle.load(open(filename, 'rb'))
-    return system
+    with open(filename, 'rb') as fh:
+        return pickle.load(fh)
 
 
 def save_system(system, filename):
@@ -19,7 +22,8 @@ def save_system(system, filename):
     """
     import pickle
 
-    pickle.dump(system, open(filename, 'wb'))
+    with open(filename, 'wb') as fh:
+        pickle.dump(system, fh)
 
 
 def write_athena(system, Nz, Lz, path=None, name=None):

@@ -49,22 +49,38 @@ class Grid:
 
     def __setstate__(self, state):
         """
-        Restore state from pickle. Differentiation matrices are intentionally
-        absent and will be rebuilt as needed.
+        Restore state from pickle and rebuild the differentiation matrices.
+
+        __getstate__ drops the matrices to keep pickles small, so they have to
+        be regenerated here. make_grid() is the only thing that can do it:
+        every concrete grid builds self._d directly inside make_grid, using
+        formulas specific to its own basis. Leaving the rebuild to a later
+        "lazy" access did not work -- there was no working lazy path, and
+        grid.D(1) on a restored grid raised NotImplementedError.
         """
         self.__dict__.update(state)
 
-        # Ensure the derivative container exists for post-refactor code paths.
-        # (If your refactor uses self._d, keep it consistent here.)
         if "_d" not in self.__dict__:
             self.__dict__["_d"] = []
 
-    def _identity(self):
-        import numpy as np
-        return np.eye(self.N + 1)
+        if "_observers" not in self.__dict__:
+            self.__dict__["_observers"] = []
 
-    def _build_d1(self):
-        raise NotImplementedError
+        # Rebuild with the observers muted.
+        #
+        # _observers holds bound methods of the objects that depend on this
+        # grid, typically System.make_background. During unpickling those
+        # objects may themselves be only half-restored -- pickle can hand the
+        # grid back before it has set system.grid -- so calling them here
+        # raises AttributeError. Muting them is also correct rather than
+        # merely expedient: the background arrays they would recompute were
+        # pickled alongside everything else and are already restored.
+        observers = self.__dict__["_observers"]
+        self.__dict__["_observers"] = []
+        try:
+            self.make_grid()
+        finally:
+            self.__dict__["_observers"] = observers
 
     @property
     def L(self):
@@ -87,8 +103,9 @@ class Grid:
 
     @property
     def d(self):
+        """The list of differentiation matrices, [D0, D1, D2, ...]."""
         if not self._d:
-            self.build_derivatives(2)
+            self.make_grid()
         return self._d
 
     @property
@@ -123,19 +140,22 @@ class Grid:
         return self._d[k]
 
     def ensure_derivatives(self, k):
+        """
+        Make sure differentiation matrices up to order k exist.
+
+        Orders beyond those the grid builds itself are formed by composition,
+        D(n) = D(1) @ D(n-1). That is exact in exact arithmetic but loses
+        roughly a digit of accuracy per order on spectral matrices, so grids
+        that can build a high order directly should do so in make_grid().
+        """
+        if k < 0:
+            raise ValueError("derivative order must be >= 0, got {}".format(k))
+
         if not self._d:
-            self.build_derivatives(min(2, k))
+            self.make_grid()
+
         while len(self._d) <= k:
             self._d.append(self._d[1] @ self._d[-1])
-
-    def build_derivatives(self, max_order=2):
-        self._d = []
-        self._d.append(self._identity())
-        if max_order >= 1:
-            self._d.append(self._build_d1())
-        if max_order >= 2:
-            self._d.append(self._build_d2() if hasattr(self, "_build_d2")
-                           else self._d[1] @ self._d[1])
 
     def finalize_derivatives(self, max_derivative_order=None):
         """
