@@ -1,5 +1,15 @@
 def plot_solution(system, filename=None, num=1, smooth=True, limits=None):
-    """Quickly plot the 1D eigenmodes stored in the system object"""
+    """
+    Quickly plot the 1D eigenmodes stored in the system object.
+
+    system:   a system whose .result holds a solved eigenmode
+    filename: if given, save the figure there instead of showing it
+    num:      matplotlib figure number to draw into (reused if it exists)
+    smooth:   also draw the spectrally interpolated profile, not just nodes
+    limits:   (zmin, zmax) to restrict the interpolated curve to
+
+    Returns the matplotlib Figure, so callers can adjust it further.
+    """
     import numpy as np
     import matplotlib.pyplot as plt
 
@@ -7,22 +17,25 @@ def plot_solution(system, filename=None, num=1, smooth=True, limits=None):
     grid = system.grid
 
     title = r'$\omega = {:1.4f}, k_x = {:1.2f}, m={}$'
-    plt.figure(num)
-    plt.clf()
-    fig, axes = plt.subplots(num=num, nrows=system.dim, sharex=True)
+
+    # clear=True resets a pre-existing figure `num` in place. Calling
+    # plt.figure(num) first and then plt.subplots(num=num, ...) asks
+    # matplotlib to create the same figure twice with a different geometry,
+    # which raises "Figure N already exists" on matplotlib >= 3.8.
+    #
+    # squeeze=False keeps `axes` a 2D array even for a single-variable
+    # system, where matplotlib would otherwise hand back a bare Axes and
+    # make axes[j] a TypeError.
+    fig, axes = plt.subplots(num=num, nrows=system.dim, sharex=True,
+                             squeeze=False, clear=True)
+    axes = axes[:, 0]
+
     for j, var in enumerate(system.variables):
         if smooth:
             if limits is None:
                 z = np.linspace(grid.zmin, grid.zmax, 2000)
             else:
                 z = np.linspace(limits[0], limits[1], 2000)
-            # var_interp = grid.interpolate(z, sol[var])
-            # axes[j].plot(
-            #     z, var_interp.real, 'C0', label='Real'
-            # )
-            # axes[j].plot(
-            #     z, var_interp.imag, 'C1', label='Imag'
-            # )
             axes[j].plot(
                 z, grid.interpolate(z, sol[var].real), 'C0', label='Real'
             )
@@ -32,12 +45,17 @@ def plot_solution(system, filename=None, num=1, smooth=True, limits=None):
         axes[j].plot(grid.zg, sol[var].real, 'C0.', label='Real')
         axes[j].plot(grid.zg, sol[var].imag, 'C1.', label='Imag')
         axes[j].set_ylabel(system.labels[j])
+
     axes[system.dim - 1].set_xlabel(r"$z$")
+
+    # Systems without kx or a stored mode index get the short title. Catching
+    # only the lookups that can legitimately be missing avoids swallowing
+    # KeyboardInterrupt and real formatting errors, as a bare except did.
     try:
         axes[0].set_title(
             title.format(sol[system.eigenvalue], system.kx, sol['mode'])
         )
-    except:
+    except (AttributeError, KeyError):
         axes[0].set_title(
             r'$\omega$ = {:1.6f}'.format(sol[system.eigenvalue])
         )
@@ -47,6 +65,8 @@ def plot_solution(system, filename=None, num=1, smooth=True, limits=None):
         fig.savefig(filename)
     else:
         plt.show()
+
+    return fig
 
 
 def get_2Dmap(system, var, xmin, xmax, Nx, Nz, zmin=None, zmax=None, time=0):
