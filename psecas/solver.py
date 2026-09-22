@@ -1423,8 +1423,38 @@ class Solver:
                         elif bound == 'Neumann':
                             submat[index, :] = grid.D(1)[index, :]
                         else:
-                            assert '=' in bound, 'equal sign missing in boundary expression'
-                            assert int(bound.split("=")[1]) == 0, 'rhs of boundary expressions must be zero'
+                            # A custom boundary expression, e.g.
+                            # 'r**2*dr(dr(Aphi)) + r*dr(Aphi) - Aphi = 0'.
+                            #
+                            # These checks used bare asserts, which python -O
+                            # strips - turning a validation failure into
+                            # silent miscomputation - and parsed the RHS with
+                            # int(), so the natural spelling 'dz(f) = 0.0'
+                            # died with "invalid literal for int() with base
+                            # 10: ' 0.0'" instead of the intended message.
+                            if '=' not in bound:
+                                raise ValueError(
+                                    "The boundary condition\n\n  {}\n\nhas no "
+                                    "equal sign. Write it as an expression "
+                                    "equal to zero, e.g. 'dz(f) = 0', or use "
+                                    "the keywords 'Dirichlet' or 'Neumann'."
+                                    .format(bound)
+                                )
+
+                            rhs = bound.split("=", 1)[1].strip()
+                            try:
+                                rhs_is_zero = float(rhs) == 0.0
+                            except ValueError:
+                                rhs_is_zero = False
+                            if not rhs_is_zero:
+                                raise ValueError(
+                                    "The right-hand side of a boundary "
+                                    "expression must be zero, but\n\n  {}\n\n"
+                                    "has '{}'. Move every term to the left, "
+                                    "e.g. write 'dz(f) - g = 0' rather than "
+                                    "'dz(f) = g'.".format(bound, rhs)
+                                )
+
                             var = self.system.variables[var_n-1]
                             bound_t = bound.split("=")[0]
 

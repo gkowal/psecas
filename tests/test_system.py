@@ -58,3 +58,40 @@ def test_add_boundary_rejects_an_unknown_variable(grid):
 
     with pytest.raises(Exception):
         system.add_boundary('nosuchvar', 'Dirichlet', 'Dirichlet')
+
+
+class _Laplace(System):
+    def make_background(self):
+        self.q = 1.0
+
+
+def _build_with_boundary(grid, lower, upper):
+    from psecas import Solver
+
+    system = _Laplace(grid, variables='f', eigenvalue='sigma')
+    system.add_equation("sigma*f = q*dz(dz(f))")
+    system.add_boundary('f', lower, upper)
+    solver = Solver(grid, system)
+    solver.get_matrix1()
+    return solver
+
+
+@pytest.mark.parametrize("rhs", ["0", "0.0", " 0 ", "0.", "-0.0"])
+def test_boundary_expression_accepts_any_spelling_of_zero(grid, rhs):
+    """
+    The RHS used to be parsed with int(), so 'dz(f) = 0.0' died with
+    "invalid literal for int() with base 10: ' 0.0'" rather than being
+    accepted or reported properly.
+    """
+    expr = "dz(f) = {}".format(rhs)
+    _build_with_boundary(grid, expr, expr)
+
+
+def test_boundary_expression_without_an_equal_sign_is_reported(grid):
+    with pytest.raises(ValueError, match="equal sign"):
+        _build_with_boundary(grid, "dz(f)", "dz(f) = 0")
+
+
+def test_boundary_expression_with_a_nonzero_rhs_is_reported(grid):
+    with pytest.raises(ValueError, match="must be zero"):
+        _build_with_boundary(grid, "dz(f) = g", "dz(f) = 0")
