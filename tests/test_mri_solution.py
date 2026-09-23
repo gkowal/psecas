@@ -64,8 +64,6 @@ def test_mri_solution(show=False, verbose=False):
 
     np.testing.assert_allclose(0.09892641, omega, atol=1e-8)
 
-    return err
-
 
 if __name__ == '__main__':
-    err = test_mri_solution(show=True, verbose=True)
+    test_mri_solution(show=True, verbose=True)

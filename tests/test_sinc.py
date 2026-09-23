@@ -57,8 +57,6 @@ def test_sinc_differentation(show=False):
     np.testing.assert_allclose(yp_num, yp_exac, atol=1e-12)
     np.testing.assert_allclose(ypp_num, ypp_exac, atol=1e-10)
 
-    return (yp_num, yp_exac)
-
 
 def test_sinc_interpolation(show=False):
     """Test the inperpolation routine of ChebyshevRationalGrid"""
@@ -93,7 +91,6 @@ def test_sinc_interpolation(show=False):
         plt.show()
 
     np.testing.assert_allclose(y_fine, y_interpolated, atol=1e-12)
-    return (y_fine, y_interpolated)
 
 
 if __name__ == "__main__":

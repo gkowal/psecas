@@ -33,8 +33,6 @@ def test_laguerre_differentation(show=False):
     np.testing.assert_allclose(yp_num, yp_exac, atol=1e-14)
     np.testing.assert_allclose(ypp_num, ypp_exac, atol=1e-14)
 
-    return (yp_num, yp_exac)
-
 
 def test_laguerre_interpolation(show=False):
     """Test the inperpolation routine of LaguerreGrid"""
@@ -62,7 +60,6 @@ def test_laguerre_interpolation(show=False):
         plt.show()
 
     np.testing.assert_allclose(y_fine, y_interpolated, atol=1e-16)
-    return (y_fine, y_interpolated)
 
 
 if __name__ == "__main__":

@@ -41,8 +41,6 @@ def test_fourier_differentation(show=False):
 
     np.testing.assert_allclose(yp_num, yp_exac, atol=1e-7)
 
-    return (yp_num, yp_exac)
-
 
 def test_fourier_interpolation(show=False):
     """Test the inperpolation routine of FourierGrid"""
@@ -83,9 +81,7 @@ def test_fourier_interpolation(show=False):
 
     np.testing.assert_allclose(y_fine, y_interpolated, atol=1e-12)
 
-    return (y_fine, y_interpolated)
-
 
 if __name__ == "__main__":
-    (yp_num, yp_exac) = test_fourier_differentation(show=True)
-    (y_fine, y_interpolated) = test_fourier_interpolation(show=True)
+    test_fourier_differentation(show=True)
+    test_fourier_interpolation(show=True)

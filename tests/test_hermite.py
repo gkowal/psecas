@@ -56,8 +56,6 @@ def test_hermite_differentation(show=False):
     np.testing.assert_allclose(yp_num, yp_exac, atol=1e-12)
     np.testing.assert_allclose(ypp_num, ypp_exac, atol=1e-12)
 
-    return (yp_num, yp_exac)
-
 
 def test_hermite_interpolation(show=False):
     """Test the inperpolation routine of ChebyshevRationalGrid"""
@@ -94,7 +92,6 @@ def test_hermite_interpolation(show=False):
         plt.show()
 
     np.testing.assert_allclose(y_fine, y_interpolated, atol=1e-8)
-    return (y_fine, y_interpolated)
 
 
 if __name__ == "__main__":

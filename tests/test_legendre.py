@@ -28,8 +28,6 @@ def test_legendre_differentation(show=False):
 
     np.testing.assert_allclose(yp_num, yp_exac, atol=1e-16)
 
-    return (yp_num, yp_exac)
-
 
 def test_legendre_interpolation(show=False):
     """Test the inperpolation routine of LegendreExtremaGrid"""
@@ -65,12 +63,11 @@ def test_legendre_interpolation(show=False):
         plt.show()
 
     np.testing.assert_allclose(y_fine, y_interpolated, atol=1e-12)
-    return (y_fine, y_interpolated)
 
 
 if __name__ == "__main__":
-    (yp_num, yp_exac) = test_legendre_differentation(show=True)
-    (y_fine, y_interpolated) = test_legendre_interpolation(show=True)
+    test_legendre_differentation(show=True)
+    test_legendre_interpolation(show=True)
 
 
 def test_legendre_grid_is_real():

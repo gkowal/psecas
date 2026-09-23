@@ -28,8 +28,6 @@ def test_kh_uniform_solution(show=False, verbose=False):
                           verbose=verbose)
     assert solver.system.result['converged'] is False
 
-    return err
-
 
 if __name__ == '__main__':
-    err = test_kh_uniform_solution(show=True, verbose=True)
+    test_kh_uniform_solution(show=True, verbose=True)
