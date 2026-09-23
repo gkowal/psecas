@@ -17,6 +17,10 @@ class LegendreExtremaGrid(Grid):
 
     """
 
+    # Lagrange interpolation through distinct nodes: high-order
+    # derivatives come from the barycentric recursion, not composition.
+    polynomial = True
+
     def __init__(self, N, zmin, zmax, z="z", max_derivative_order=2):
         super().__init__(N, zmin, zmax, z=z, max_derivative_order=max_derivative_order)
 

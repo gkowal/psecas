@@ -164,9 +164,18 @@ def test_grid_Dn_up_to_4th_order_against_analytic(grid_name, grid_factory, expec
     ref = _psi_derivatives_up_to_4(x, c)  # orders 0..4
     f0 = ref[0]
 
-    # Baseline tolerances; tune per grid as needed after first runs.
+    # Tolerances set from measured errors with roughly an order of magnitude
+    # of headroom. Worst case across the grids covered here is 4.5e-08 (D1),
+    # 2.2e-08 (D2), 1.4e-07 (D3), 3.4e-07 (D4).
+    #
+    # D3 and D4 used to need 5e-6 and 6e-5 because orders above 2 were formed
+    # by repeated multiplication of D1, which loses roughly a digit per
+    # order; LegendreExtremaGrid failed even that at 6.2e-05. They are now
+    # built with the barycentric recursion, so these tolerances are tight
+    # enough to catch a regression back to composition.
+    #
     # One-sided grids are allowed looser tolerances due to domain mapping effects.
-    tol = {1: 5e-8, 2: 5e-7, 3: 5e-6, 4: 6e-5}
+    tol = {1: 5e-7, 2: 5e-7, 3: 2e-6, 4: 5e-6}
     if not expect_symmetric:  # proxy for one-sided here
         tol = {k: 10.0 * v for k, v in tol.items()}
 

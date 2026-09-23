@@ -72,10 +72,14 @@ class HermiteGrid(Grid):
 
         from dmsuite import herdif
 
-        zg, D = herdif(self.NN, 2, 1 / self.C)
+        # Ask dmsuite for every order we need. It builds each one directly
+        # rather than by repeated multiplication, which is more accurate at
+        # high order than the composition fallback in Grid.
+        order = max(2, self._max_derivative_order)
+        zg, D = herdif(self.NN, order, 1 / self.C)
 
         self.zg = zg
-        self._d = [ np.eye(self.NN), D[0], D[1] ]
+        self._d = [np.eye(self.NN)] + [D[i] for i in range(order)]
 
         self.finalize_derivatives()
 

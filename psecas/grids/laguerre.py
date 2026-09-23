@@ -72,10 +72,12 @@ class LaguerreGrid(Grid):
 
         from dmsuite import lagdif
 
-        zg, D = lagdif(self.NN, 2, 1 / self.C)
+        # Ask dmsuite for every order we need; see the note in hermite.py.
+        order = max(2, self._max_derivative_order)
+        zg, D = lagdif(self.NN, order, 1 / self.C)
 
         self.zg = zg
-        self._d = [ np.eye(self.NN), D[0], D[1] ]
+        self._d = [np.eye(self.NN)] + [D[i] for i in range(order)]
 
         self.finalize_derivatives()
 
