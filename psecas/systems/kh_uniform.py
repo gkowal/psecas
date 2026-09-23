@@ -1,3 +1,6 @@
+from sympy import tanh, diff, lambdify, symbols
+import numpy as np
+
 class KelvinHelmholtzUniform:
     """
        Kelvin-Helmholtz instability with anisotropic viscosity and a constant
@@ -20,7 +23,6 @@ class KelvinHelmholtzUniform:
     """
 
     def __init__(self, grid, beta, nu, kx, u0=1, z1=0.5, z2=1.5, a=0.05):
-        import numpy as np
 
         # Parameters that change (TODO: make nu, beta, and chi0 part of this)
         self._u0 = u0
@@ -85,7 +87,6 @@ class KelvinHelmholtzUniform:
         self.make_background()
 
     def make_background(self):
-        from sympy import tanh, diff, lambdify, symbols
 
         z = symbols("z")
 

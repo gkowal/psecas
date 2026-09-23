@@ -1,4 +1,6 @@
 from psecas.grids.grid import Grid, InfiniteGrid
+from scipy.interpolate import barycentric_interpolate
+import numpy as np
 
 
 class LaguerreGrid(InfiniteGrid, Grid):
@@ -21,11 +23,11 @@ class LaguerreGrid(InfiniteGrid, Grid):
     maxN = 120
 
     def make_grid(self):
-        import numpy as np
 
         # from numpy.polynomial import Laguerre as H
         self.NN = self.N + 1
 
+        # Optional dependency; see the note in hermite.py.
         from dmsuite import lagdif
 
         # Ask dmsuite for every order we need; see the note in hermite.py.
@@ -43,8 +45,6 @@ class LaguerreGrid(InfiniteGrid, Grid):
 
     def interpolate(self, z, f):
         """"""
-        from scipy.interpolate import barycentric_interpolate
-        import numpy as np
 
         msg = "Can't interpolate outside grid domain"
         assert np.array([z]).min() >= self.zmin, msg

@@ -1,4 +1,7 @@
 from psecas.grids.grid import Grid
+from numpy import sin, tan, arange, pi
+from scipy.linalg import toeplitz
+import numpy as np
 
 
 class FourierGrid(Grid):
@@ -32,9 +35,6 @@ class FourierGrid(Grid):
         Make the grid. We use the toeplitz implementation which is outlined
         in the book by Trefethen and the accompanying Matlab files.
         """
-        import numpy as np
-        from numpy import sin, tan, arange, pi
-        from scipy.linalg import toeplitz
 
         N = self._N
         self.NN = N
@@ -74,7 +74,6 @@ class FourierGrid(Grid):
 
     def to_coefficients(self, f):
         """Calculate the (shifted) complex Fourier coefficients"""
-        import numpy as np
 
         assert len(f) == self.N
 
@@ -83,7 +82,6 @@ class FourierGrid(Grid):
         return ak
 
     def interpolate(self, z, f):
-        import numpy as np
 
         assert len(f) == self.N
 

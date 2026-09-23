@@ -1,4 +1,6 @@
 from psecas.grids.grid import Grid, InfiniteGrid
+from scipy.interpolate import barycentric_interpolate
+import numpy as np
 
 
 class HermiteGrid(InfiniteGrid, Grid):
@@ -21,11 +23,13 @@ class HermiteGrid(InfiniteGrid, Grid):
     maxN = 245
 
     def make_grid(self):
-        import numpy as np
 
         # from numpy.polynomial import Hermite as H
         self.NN = self.N
 
+        # Imported here, not at module level: dmsuite is an optional
+        # dependency (pyproject.toml extra 'dmsuite') that only this grid
+        # and LaguerreGrid need, so `import psecas` must not require it.
         from dmsuite import herdif
 
         # Ask dmsuite for every order we need. It builds each one directly
@@ -48,8 +52,6 @@ class HermiteGrid(InfiniteGrid, Grid):
         # from numpy.polynomial.hermite import hermfit, hermval
         # c, res = hermfit(self.zg, f, deg=self.N, full=True)
         # return hermval(z, c)
-        from scipy.interpolate import barycentric_interpolate
-        import numpy as np
 
         msg = "Can't interpolate outside grid domain"
         assert np.array([z]).min() >= self.zmin, msg

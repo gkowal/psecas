@@ -1,3 +1,5 @@
+import numpy as np
+
 class InfiniteGrid:
     """
     Mixin for grids on an infinite or semi-infinite domain.
@@ -56,7 +58,6 @@ def _barycentric_weights(x):
     nodes of a Gauss-Lobatto grid well before N gets interesting. Only ratios
     of weights are ever used, so the overall normalisation is free.
     """
-    import numpy as np
 
     diff = x[:, None] - x[None, :]
     np.fill_diagonal(diff, 1.0)
@@ -88,7 +89,6 @@ def _polynomial_derivative_matrices(x, max_order):
     Reference: Welfert, SIAM J. Numer. Anal. 34 (1997) 1640; see also
     Berrut & Trefethen, SIAM Review 46 (2004) 501.
     """
-    import numpy as np
 
     x = np.asarray(x, dtype=float)
     n = x.size
@@ -299,7 +299,6 @@ class Grid:
         which is exact in exact arithmetic but loses roughly a digit of
         accuracy per order.
         """
-        import numpy as np
 
         if k < 0:
             raise ValueError("derivative order must be >= 0, got {}".format(k))
@@ -349,7 +348,6 @@ class Grid:
 
     def der(self, vec):
         """First derivative of vec defined at zg"""
-        import numpy as np
 
         assert type(vec) is np.ndarray
         assert vec.shape[0] == self.NN
@@ -357,7 +355,6 @@ class Grid:
 
     def dder(self, vec):
         """Second derivative of vec defined at zg"""
-        import numpy as np
 
         assert type(vec) is np.ndarray
         assert vec.shape[0] == self.NN
@@ -365,7 +362,6 @@ class Grid:
 
     def derivative(self, vec, n):
         """N-th order derivative of vec defined at zg"""
-        import numpy as np
 
         assert type(vec) is np.ndarray
         assert vec.shape[0] == self.NN

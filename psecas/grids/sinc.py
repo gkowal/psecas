@@ -1,4 +1,6 @@
 from psecas.grids.grid import Grid, InfiniteGrid
+from scipy.linalg import toeplitz
+import numpy as np
 
 
 class SincGrid(InfiniteGrid, Grid):
@@ -19,13 +21,10 @@ class SincGrid(InfiniteGrid, Grid):
 
     @property
     def dz(self):
-        import numpy as np
 
         return self.C / np.sqrt(self.N)
 
     def make_grid(self):
-        import numpy as np
-        from scipy.linalg import toeplitz
 
         self.NN = self.N + 1
         N = self.NN
@@ -58,7 +57,6 @@ class SincGrid(InfiniteGrid, Grid):
         This function uses Lagrange interpolation (eq. 4.6 in Boyd) with
         the sinc Cardinal functions (eq F.34 in Boyd)
         """
-        import numpy as np
 
         msg = "Can't interpolate outside solution domain"
         assert np.array([z]).min() >= self.zmin, msg

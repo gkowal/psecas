@@ -1,3 +1,7 @@
+from sympy import tanh, diff, lambdify, symbols
+import numpy as np
+import sympy as sym
+
 class KelvinHelmholtzHydroOnlySlab:
     """
     The pure hydro version of the Kelvin-Helmholtz instability.
@@ -72,9 +76,6 @@ class KelvinHelmholtzHydroOnlySlab:
         self.make_background()
 
     def make_background(self):
-        import sympy as sym
-        import numpy as np
-        from sympy import tanh, diff, lambdify, symbols
 
         z = symbols("z")
 

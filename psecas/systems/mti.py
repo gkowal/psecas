@@ -1,3 +1,8 @@
+from numpy import sqrt
+from sympy import exp, lambdify
+import numpy as np
+import sympy as sym
+
 class MagnetoThermalInstability:
     """
        The linear solution for the magnetothermal instability (MTI)
@@ -104,14 +109,12 @@ class MagnetoThermalInstability:
         self.chi0 = 24.0 / self._Kn0
 
     def set_va_and_B0(self):
-        from numpy import sqrt
 
         self.B0 = sqrt(2 * self.p0 / self._beta)
         self.va = self.B0 / sqrt(self.mu0 * self.rho0)
 
     def get_bx_and_by(self):
         """Calculate dbx and dbz. Requires a solution stored!"""
-        import numpy as np
 
         self.grid.make_grid()
         self.result.update(
@@ -124,9 +127,6 @@ class MagnetoThermalInstability:
     def make_background(self):
         """Functing for creating the background profiles.
         Returns symbolic expressions (as a function of z) """
-        import sympy as sym
-        import numpy as np
-        from sympy import exp, lambdify
 
         z = sym.symbols("z")
 

@@ -1,4 +1,5 @@
 from psecas.grids.grid import Grid, InfiniteGrid
+import numpy as np
 
 
 class ChebyshevRationalGrid(InfiniteGrid, Grid):
@@ -19,7 +20,6 @@ class ChebyshevRationalGrid(InfiniteGrid, Grid):
     """
 
     def cheb_gauss_nodes_and_Dx(self, N):
-        import numpy as np
 
         j = np.arange(1, N+1)
         φ = (2*j - 1 - N) * np.pi / (2*N)   # Gauss angles (symmetric)
@@ -42,7 +42,6 @@ class ChebyshevRationalGrid(InfiniteGrid, Grid):
         return s, x, λ, Dx
 
     def make_grid(self):
-        import numpy as np
 
         C = self.C
         self.NN = self.N + 1
@@ -96,7 +95,6 @@ class ChebyshevRationalGrid(InfiniteGrid, Grid):
         p : float or ndarray
             Interpolated values at z.
         """
-        import numpy as np
 
         z = np.asarray(z, dtype=float)
         f = np.asarray(f)

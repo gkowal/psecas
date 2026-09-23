@@ -1,3 +1,7 @@
+from sympy import exp, lambdify
+import numpy as np
+import sympy as sym
+
 class HeatFluxDrivenBuoyancyInstability:
     """
        The linear equations for the heat-flux-driven buoyancy instability (HBI)
@@ -75,7 +79,6 @@ class HeatFluxDrivenBuoyancyInstability:
 
     def get_bx_and_by(self):
         """Calculate dbx and dbz. Requires a solution stored!"""
-        import numpy as np
 
         self.grid.make_grid()
         self.result.update(
@@ -88,8 +91,6 @@ class HeatFluxDrivenBuoyancyInstability:
     def make_background(self):
         """Functing for creating the background profiles.
         """
-        import sympy as sym
-        from sympy import exp, lambdify
 
         z = sym.symbols("z")
 

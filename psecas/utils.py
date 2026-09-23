@@ -1,3 +1,5 @@
+import numpy as np
+
 def golden_section(f, a, b, tol=1e-5, **kwargs):
     """
     Golden section search.
@@ -17,7 +19,6 @@ def golden_section(f, a, b, tol=1e-5, **kwargs):
     >>> print (c,d)
     (1.9999959837979107, 2.0000050911830893)
     """
-    import numpy as np
 
     # 1/phi
     invphi = (np.sqrt(5) - 1) / 2

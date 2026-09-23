@@ -1,3 +1,16 @@
+from datetime import datetime
+from numpy import arange
+from numpy import float64
+import os
+import pickle
+import shutil
+import socket
+
+# mpi4py is imported inside the methods that use it. It is an optional
+# dependency (pyproject.toml extra 'mpi'), and psecas/__init__.py imports
+# this module unconditionally, so `import psecas` must work without it.
+
+
 class IO:
     def __init__(self, system, data_folder, experiment, steps, tag=""):
         """
@@ -8,7 +21,6 @@ class IO:
         """
         from mpi4py.MPI import COMM_WORLD as comm
         from mpi4py.MPI import Wtime
-        from numpy import arange
 
         self.system = system
 
@@ -20,18 +32,12 @@ class IO:
         # Folder where data is stored. Accept it with or without a trailing
         # separator rather than asserting on one; asserts are stripped by
         # python -O, and os.path.join does the right thing either way.
-        import os
 
         self.data_folder = os.path.join(data_folder, "")
         self.logfile = os.path.join(self.data_folder, "psecas.log")
 
         if comm.rank == 0:
-            import os
-            import shutil
-            import socket
             import subprocess
-            from datetime import datetime
-            from numpy import float64
 
             # Create datafolder.
             #
@@ -143,8 +149,6 @@ class IO:
             f.write("Rank {}:".format(comm.rank) + string)
 
     def save_system(self, i):
-        import os
-        import pickle
 
         path = os.path.join(
             self.data_folder,
@@ -165,7 +169,6 @@ class IO:
         seconds = Wtime() - self.wt
         if comm.rank == 0:
             # import subprocess
-            from datetime import datetime
 
             # Time at end of simulation
             i = datetime.now()

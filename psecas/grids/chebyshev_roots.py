@@ -1,4 +1,7 @@
 from psecas.grids.grid import Grid
+from numpy.polynomial.chebyshev import chebfit
+from numpy.polynomial.chebyshev import chebval
+import numpy as np
 
 
 class ChebyshevRootsGrid(Grid):
@@ -25,7 +28,6 @@ class ChebyshevRootsGrid(Grid):
         super().__init__(N, zmin, zmax, z=z, max_derivative_order=max_derivative_order)
 
     def make_grid(self):
-        import numpy as np
 
         N = self._N
         self.NN = N + 1
@@ -57,8 +59,6 @@ class ChebyshevRootsGrid(Grid):
             callback()
 
     def to_coefficients(self, f):
-        from numpy.polynomial.chebyshev import chebfit
-        import numpy as np
 
         # Convert grid to standard xg = [-1, 1]
         xg = (self.zg - self.zmin)/self.L * 2. - 1.
@@ -69,8 +69,6 @@ class ChebyshevRootsGrid(Grid):
         return c
 
     def interpolate(self, z, f):
-        from numpy.polynomial.chebyshev import chebval
-        import numpy as np
 
         msg = "Can't interpolate outside grid domain"
         assert np.array([z]).min() >= self.zmin, msg

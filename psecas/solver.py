@@ -1,4 +1,15 @@
 from .string_methods import contains_symbol as _contains_symbol
+from numpy.linalg import inv
+from scipy import sparse
+from scipy.linalg import eig
+from scipy.sparse.linalg import eigs
+from scipy.sparse.linalg import eigs, splu, LinearOperator
+import builtins
+import copy
+import numpy as np
+import re
+import scipy.sparse as sp
+import warnings
 
 
 def _make_eval_globals():
@@ -32,9 +43,7 @@ def _make_eval_globals():
     and np.where() work in an equation string or a boundary expression
     instead of raising NameError.
     """
-    import builtins
 
-    import numpy as np
 
     names = {
         "__builtins__": builtins,
@@ -104,7 +113,6 @@ def _rel_residual(A, B, σ, v):
     B may be None, meaning the identity.  Returns np.inf if the normalisation
     vanishes, so that a degenerate result never passes a tolerance test.
     """
-    import numpy as np
 
     Av = A @ v
     Bv = v if B is None else B @ v
@@ -149,7 +157,6 @@ class Solver:
     """
 
     def __init__(self, grid, system, do_gen_evp=False):
-        import numpy as np
 
         # Grid object
         self.grid = grid
@@ -261,7 +268,6 @@ class Solver:
 
         if not self.do_gen_evp:
             # If mat2 is not the identity matrix, then we have to solve a generalized evp
-            from scipy import sparse
             self.get_matrix1()
             self.get_matrix2()
             mat2_is_identity = (self.mat2 - sparse.eye(self.mat1.shape[0])).count_nonzero() == 0
@@ -294,7 +300,6 @@ class Solver:
         This function intentionally performs *no* sorting/filtering and has no
         side-effects (does not call keep_result and does not write self.E/self.v).
         """
-        from scipy.linalg import eig
 
         self.get_matrix1()
 
@@ -368,9 +373,6 @@ class Solver:
             If the residual check fails.  The offending eigenvalue and
             residual are attached to the exception.
         """
-        import numpy as np
-        import scipy.sparse as sp
-        from scipy.sparse.linalg import eigs, splu, LinearOperator
 
         def refine_eigenvector(A, σ, v, B=None, nsteps=10, rtol=1e-3):
             """
@@ -513,7 +515,6 @@ class Solver:
         V_f : np.ndarray or None
             Filtered eigenvectors (columns), or None if V was None.
         """
-        import numpy as np
 
         Σ = np.asarray(Σ)
         if Σ.ndim != 1:
@@ -568,7 +569,6 @@ class Solver:
         Unpack eigenvector into dict(var -> field profile on grid nodes).
         Returns profiles with length grid.NN.
         """
-        import numpy as np
 
         NN = grid.NN
 
@@ -592,7 +592,6 @@ class Solver:
         Pack dict(var -> field profile on grid nodes) into eigenvector format
         appropriate for the solver on this grid.
         """
-        import numpy as np
 
         NN = grid.NN
 
@@ -621,7 +620,6 @@ class Solver:
         Unpacks the vector into per-variable profiles, interpolates each one
         onto the new nodes, and repacks it in the new grid's layout.
         """
-        import numpy as np
 
         # 1) unpack old vector into old-grid profiles (length grid_old.NN)
         fields_old = self.eigenvector_to_fields(V_old, grid_old)
@@ -767,8 +765,6 @@ class Solver:
         error : float
             Final convergence error estimate for the selected mode.
         """
-        import numpy as np
-        import copy
 
         def _print_modes(Σ, N, errors=None, case=None, delta=None, error=None):
             n = Σ.size
@@ -998,8 +994,6 @@ class Solver:
         saveall (default False): also store the full sorted spectrum in
         self.E and the corresponding eigenvectors in self.v.
         """
-        import warnings
-        from scipy.linalg import eig
 
         if useOPinv is not _UNSET:
             warnings.warn(
@@ -1076,8 +1070,6 @@ class Solver:
         returned eigenpair. Raises ShiftInvertError if exceeded. Pass None
         to disable the check.
         """
-        import numpy as np
-        from scipy.sparse.linalg import eigs
 
         # Calculate right-hand matrix
         self.get_matrix1()
@@ -1099,7 +1091,6 @@ class Solver:
                                        residual_tol=residual_tol)
         else:
             if useOPinv:
-                from numpy.linalg import inv
                 OPinv = inv(self.mat1 - guess * np.eye(self.mat1.shape[0]))
                 sigma, v = eigs(self.mat1, k=1, sigma=guess, OPinv=OPinv)
             else:
@@ -1146,7 +1137,6 @@ class Solver:
         mode that fails the check is discarded and that resolution is redone
         with a full solve. Pass None to disable the check (not recommended).
         """
-        import numpy as np
 
         Ns = list(Ns)
         if len(Ns) < 2:
@@ -1219,7 +1209,6 @@ class Solver:
         and index orders it. Override this method for problems whose
         eigenvalues do not sit near unity.
         """
-        import numpy as np
 
         # Copy first. This used to modify the caller's array in place, so
         # merely asking how the solver would sort a spectrum destroyed it.
@@ -1234,7 +1223,6 @@ class Solver:
         return (E, index)
 
     def keep_result(self, sigma, vec, mode):
-        import numpy as np
 
         # Store result
         if all(self.system.boundaries) and not self.do_gen_evp:
@@ -1261,8 +1249,6 @@ class Solver:
         """
         Calculate the matrix M₁ neded in the solve method.
         """
-        from scipy import sparse
-        import numpy as np
         from .string_methods import var_replace
 
         dim = self.system.dim
@@ -1300,8 +1286,6 @@ class Solver:
         """
         Calculate the matrix M₂ neded in the solve method.
         """
-        from scipy import sparse
-        import numpy as np
         from .string_methods import var_replace
 
         dim = self.system.dim
@@ -1374,7 +1358,6 @@ class Solver:
         It is introduced as a refactoring hook; subsequent commits extend it
         to support higher-order derivatives and dz(var, n) syntax.
         """
-        import re
         from .string_methods import var_replace
 
         der = "d" + grid.z + "("
@@ -1434,8 +1417,6 @@ class Solver:
 
 
     def _find_submatrices(self, eq, verbose=False):
-        import numpy as np
-        from scipy import sparse
         from .string_methods import var_replace
 
         grid = self.system.grid
@@ -1543,7 +1524,6 @@ class Solver:
 
         The Boundary condition on a variable cannot depend on the other independent variables.
         """
-        import numpy as np
         from .string_methods import var_replace
 
         grid = self.system.grid

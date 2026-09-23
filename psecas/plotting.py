@@ -1,3 +1,12 @@
+import numpy as np
+
+# matplotlib is imported inside the functions that need it rather than at
+# module level. psecas/__init__.py imports this module, so a module-level
+# `import matplotlib.pyplot` would pull in a plotting backend on every
+# `import psecas` - slow, and it fixes the backend before a caller has had
+# a chance to choose one.
+
+
 def plot_solution(system, filename=None, num=1, smooth=True, limits=None):
     """
     Quickly plot the 1D eigenmodes stored in the system object.
@@ -10,7 +19,6 @@ def plot_solution(system, filename=None, num=1, smooth=True, limits=None):
 
     Returns the matplotlib Figure, so callers can adjust it further.
     """
-    import numpy as np
     import matplotlib.pyplot as plt
 
     sol = system.result
@@ -74,7 +82,6 @@ def get_2Dmap(system, var, xmin, xmax, Nx, Nz, zmin=None, zmax=None, time=0):
        This function assumes that the eigenmodes have the form
        f(z)*exp(i kx x).
     """
-    import numpy as np
 
     dx = (xmax - xmin) / Nx
     # + xmin: the cell centres must span [xmin, xmax]. Without it the map was
@@ -121,7 +128,6 @@ def get_2D_cylindrical_map_in_cylindrical_coords(
        f(r)*exp(i kz z + i m phi). It returns a map in the r-phi plane at
        a fixed value of z (default 0)
     """
-    import numpy as np
 
     # Create linear grid in phi
     dphi = (phimax - phimin) / (Nphi - 1)
@@ -182,7 +188,6 @@ def get_2D_cylindrical_map_in_cylindrical_coords(
 def get_2D_cylindrical_map(
     system, var, xmin, xmax, ymin, ymax, Nx, Ny, time=0, z=0
 ):
-    import numpy as np
     x = np.linspace(xmin, xmax, Nx)
     y = np.linspace(ymin, ymax, Ny)
     xx, yy = np.meshgrid(x, y)

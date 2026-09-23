@@ -1,3 +1,6 @@
+from sympy import symbols, lambdify, diff, tanh, sech
+import numpy as np
+
 class TearingClassicalMHD:
     """
         The class implements a linear stability analysis of the tearing instability
@@ -37,7 +40,6 @@ class TearingClassicalMHD:
     """
     def __init__(self, grid, kx=0, ky=0, z1=-0.5, z2=0.5, a=1, w=0, \
                 S=1e4, Pr=0, ζ=0, ξ=0, ϵ=0, Bguide=0, kh=None, shear=True, periodic=True):
-        import numpy as np
 
         # Validation checks
         if kx < 0:
@@ -256,7 +258,6 @@ class TearingClassicalMHD:
         self.make_background()
 
     def make_background(self):
-        from sympy import symbols, lambdify, diff, tanh, sech
 
         def sech_stable(x):
             """
@@ -264,7 +265,6 @@ class TearingClassicalMHD:
             Uses: sech(x) = 2*e^{-|x|} / (1 + e^{-2|x|})
             This avoids overflow for large |x| and loss of precision near 0.
             """
-            import numpy as np
 
             x = np.asarray(x, dtype=np.float64)
             t = np.exp(-np.abs(x))          # in [0, 1]
@@ -342,7 +342,6 @@ class TearingGyrotropicMHD:
     def __init__(self, grid, kx=0, ky=0, z1=-0.5, z2=0.5, a=1, \
                     S=1e4, Pr=0, β=0, Δβ=0, ɣpar=3, ɣper=2, ϵ=0, σ=0, periodic=True,
                     normalized=False):
-        import numpy as np
 
         # Validation checks
         if kx <= 0:
@@ -643,7 +642,6 @@ class TearingGyrotropicMHD:
         self.Γβ  = self.Γ1 * self.β0 / 2 + self.Γ2 * self.Δβ0 / 2
 
     def make_background(self):
-        from sympy import symbols, lambdify, diff, tanh, sech
 
         def sech_stable(x):
             """
@@ -651,7 +649,6 @@ class TearingGyrotropicMHD:
             Uses: sech(x) = 2*e^{-|x|} / (1 + e^{-2|x|})
             This avoids overflow for large |x| and loss of precision near 0.
             """
-            import numpy as np
 
             x = np.asarray(x, dtype=np.float64)
             t = np.exp(-np.abs(x))          # in [0, 1]

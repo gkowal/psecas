@@ -1,4 +1,8 @@
 from psecas.grids.grid import Grid
+from numpy.polynomial.legendre import legder, legroots, legval
+from numpy.polynomial.legendre import legfit
+from numpy.polynomial.legendre import legval
+import numpy as np
 
 
 class LegendreExtremaGrid(Grid):
@@ -25,8 +29,6 @@ class LegendreExtremaGrid(Grid):
         super().__init__(N, zmin, zmax, z=z, max_derivative_order=max_derivative_order)
 
     def make_grid(self):
-        import numpy as np
-        from numpy.polynomial.legendre import legder, legroots, legval
 
         N = self._N
         self.NN = N + 1
@@ -73,7 +75,6 @@ class LegendreExtremaGrid(Grid):
 
     def to_coefficients(self, f):
         """Coefficients of f in the standard Legendre basis on [-1, 1]."""
-        from numpy.polynomial.legendre import legfit
 
         # Fit on the mapped grid, matching what the Chebyshev grids do.
         # Fitting on the physical grid instead made the accuracy depend on
@@ -86,8 +87,6 @@ class LegendreExtremaGrid(Grid):
         return c
 
     def interpolate(self, z, f):
-        from numpy.polynomial.legendre import legval
-        import numpy as np
 
         msg = "Can't interpolate outside grid domain"
         assert np.array([z]).min() >= self.zmin, msg
