@@ -95,7 +95,7 @@ for jj, grid in enumerate(grids):
     axes[jj, 0].plot(r, grid.interpolate(r, system.result['f'].imag))
     axes[jj, 0].set_title(
         type(grid).__name__
-        + ", $\kappa$-error={:1.3e}".format(kappa.real - kappa_ref)
+        + r", $\kappa$-error={:1.3e}".format(kappa.real - kappa_ref)
     )
 
     # Normalize solution to bessel function exact solution at r = 0.5

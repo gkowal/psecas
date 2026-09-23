@@ -686,7 +686,8 @@ class Solver:
                        orderby='tolerance', metric="complex",
                        re_range=None, im_range=None, require_re_positive=True,
                        useOPinv=True, useEVguess=True, verbose=False,
-                       residual_tol=1e-6, plots=False, plot_dir=None):
+                       residual_tol=1e-6, allgrids=False,
+                       plots=False, plot_dir=None):
         """
         Iteratively solve the eigenvalue problem over a sequence of
         increasing grid resolutions using a multimode, hybrid strategy.
@@ -768,6 +769,13 @@ class Solver:
         verbose : bool
             If True, print detailed information about solver progress,
             convergence status, and strategy switching.
+
+        allgrids : bool
+            If False (default), return as soon as the selected mode meets
+            the convergence criterion. If True, work through every
+            resolution in Ns regardless, and report the result from the
+            last one. Useful for convergence studies, and for making the
+            cost of a sweep independent of the problem.
 
         residual_tol : float or None
             Relative-residual tolerance applied to every single-mode
@@ -908,6 +916,7 @@ class Solver:
 
         error = np.inf
         delta = np.inf
+        converged = False
         # With a single resolution there is nothing to compare against, so no
         # error can be estimated. Initialising here rather than inside the
         # loop keeps the return statements below well defined; leaving it
@@ -977,20 +986,22 @@ class Solver:
                 _print_modes(Σ_new, self.grid.N, errors=errors, case=case, delta=delta, error=error)
 
             if error <= 1.0:
-                self.keep_result(Σ_new[mode], V_new[:,mode], mode)
-                self.system.result.update({"converged": True})
-                self.system.result.update({"error": error})
-                self.system.result.update({"grid": self.grid.zg})
-                if allmodes:
-                    return Σ_new[:modes], V_new[:, :modes], errors[:modes]
-                return Σ_new[mode], V_new[:,mode], errors[mode]
+                converged = True
+                if not allgrids:
+                    self.keep_result(Σ_new[mode], V_new[:,mode], mode)
+                    self.system.result.update({"converged": True})
+                    self.system.result.update({"error": error})
+                    self.system.result.update({"grid": self.grid.zg})
+                    if allmodes:
+                        return Σ_new[:modes], V_new[:, :modes], errors[:modes]
+                    return Σ_new[mode], V_new[:,mode], errors[mode]
 
             Σ_old = Σ_new.copy()
             V_old = V_new.copy()
             grid_old = copy.deepcopy(self.grid)
 
         self.keep_result(Σ_old[mode], V_old[:,mode], mode)
-        self.system.result.update({"converged": False})
+        self.system.result.update({"converged": converged})
         self.system.result.update({"error": error})
         self.system.result.update({"grid": self.grid.zg})
 

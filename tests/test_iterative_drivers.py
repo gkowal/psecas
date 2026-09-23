@@ -70,3 +70,41 @@ def test_multimode_can_track_damped_modes():
         [32, 48], require_re_positive=False, orderby='real'
     )
     assert sigma.real < 0
+
+
+def test_allgrids_runs_every_resolution():
+    """
+    With allgrids=True the sweep works through all of Ns even after the
+    convergence criterion is met, instead of returning early.
+    """
+    Ns = [32, 48, 64, 96, 128]
+
+    early = _mti_solver()
+    early.iterate_solve_multimode(Ns, rtol=1e-3)
+
+    full = _mti_solver()
+    full.iterate_solve_multimode(Ns, rtol=1e-3, allgrids=True)
+
+    assert early.grid.N < Ns[-1]          # stopped early
+    assert full.grid.N == Ns[-1]          # ran to the end
+    assert early.system.result["converged"] is True
+    assert full.system.result["converged"] is True
+
+
+def test_allgrids_reports_the_same_eigenvalue():
+    Ns = [32, 48, 64, 96]
+
+    early = _mti_solver().iterate_solve_multimode(Ns, rtol=1e-3)
+    full = _mti_solver().iterate_solve_multimode(Ns, rtol=1e-3, allgrids=True)
+
+    np.testing.assert_allclose(early[0], full[0], rtol=1e-6)
+
+
+def test_allgrids_still_reports_failure_to_converge():
+    """A sweep that never converges must not be marked converged."""
+    solver = _mti_solver()
+
+    solver.iterate_solve_multimode([32, 48], rtol=1e-14, atol=1e-30,
+                                   allgrids=True)
+
+    assert solver.system.result["converged"] is False

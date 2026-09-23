@@ -316,9 +316,9 @@ def eigenmodes(**params):
         system  = Tearing(grid, kx=α, a=a, w=w, ζ=ζ, CGL=CGL, S=S, Pr=Pr, \
                      ξ=ξ, ϵ=ϵ, β=β, Δβ=Δβ, ɣpar=ɣpar, ɣper=ɣper, \
                      periodic=False)
-        solver  = Solver(grid, system, re_range=[σlower, σupper])
-        σ, v, e = solver.iterate_solver(Ns, maxmode=mode, useOPinv=False, \
-                     guess_tol=gtol, atol=atol, rtol=rtol, \
+        solver  = Solver(grid, system)
+        σ, v, e = solver.iterate_solve_multimode(Ns, maxmode=mode, useOPinv=False, \
+                     gtol=gtol, atol=atol, rtol=rtol, re_range=[σlower, σupper], \
                      allmodes=True, allgrids=allgrids, orderby=orderby, verbose=verbose)
         N = solver.grid.N
 
@@ -474,8 +474,8 @@ def eigenmodes_old(**params):
                      ξ=ξ, ϵ=ϵ, β=β, Δβ=Δβ, ɣpar=ɣpar, ɣper=ɣper, \
                      periodic=False)
         solver  = Solver(grid, system)
-        σ, v, e = solver.iterate_solver(Ns, maxmode=mode, \
-                     atol=abstol, rtol=reltol, real_range=[σlower, σupper], \
+        σ, v, e = solver.iterate_solve_multimode(Ns, maxmode=mode, \
+                     atol=abstol, rtol=reltol, re_range=[σlower, σupper], \
                      allmodes=True, allgrids=allgrids, orderby=orderby, verbose=verbose)
         N = solver.grid.N
 
