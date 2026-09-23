@@ -25,6 +25,8 @@ class SincGrid(InfiniteGrid, Grid):
         return self.C / np.sqrt(self.N)
 
     def make_grid(self):
+        """Build the nodes zg and the differentiation matrices, then notify
+        any objects bound to this grid."""
 
         self.NN = self.N + 1
         N = self.NN

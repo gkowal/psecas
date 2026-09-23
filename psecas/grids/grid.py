@@ -33,10 +33,12 @@ class InfiniteGrid:
 
     @property
     def zmin(self):
+        """Smallest node. Follows from N and C rather than being set."""
         return self.zg.min()
 
     @property
     def zmax(self):
+        """Largest node. Follows from N and C rather than being set."""
         return self.zg.max()
 
     @property
@@ -224,6 +226,7 @@ class Grid:
 
     @property
     def L(self):
+        """Length of the domain, zmax - zmin."""
         return self.zmax - self.zmin
 
     def _validate_N(self, value):
@@ -235,18 +238,31 @@ class Grid:
             )
 
     def bind_to(self, callback):
+        """
+        Register a callback to be invoked whenever the grid is rebuilt.
+
+        System uses this to re-evaluate its background state when the
+        resolution changes, so that a resolution sweep stays consistent.
+        """
         self._observers.append(callback)
 
     @property
     def N(self):
+        """
+        Resolution parameter. Note that the number of grid points is NN,
+        which is N + 1 for most grids but N for FourierGrid and
+        HermiteGrid. Setting N rebuilds the grid.
+        """
         return self._N
 
     @property
     def zmin(self):
+        """Lower end of the domain. Setting it rebuilds the grid."""
         return self._zmin
 
     @property
     def zmax(self):
+        """Upper end of the domain. Setting it rebuilds the grid."""
         return self._zmax
 
     @property
@@ -258,14 +274,17 @@ class Grid:
 
     @property
     def d0(self):
+        """Identity matrix. Alias for D(0)."""
         return self.D(0)
 
     @property
     def d1(self):
+        """First derivative matrix. Alias for D(1)."""
         return self.D(1)
 
     @property
     def d2(self):
+        """Second derivative matrix. Alias for D(2)."""
         return self.D(2)
 
     @N.setter
@@ -285,6 +304,12 @@ class Grid:
         self.make_grid()
 
     def D(self, k):
+        """
+        The k-th order differentiation matrix, built on first use.
+
+        D(0) is the identity, so that D(k) @ f approximates the k-th
+        derivative of f sampled on self.zg.
+        """
         self.ensure_derivatives(k)
         return self._d[k]
 

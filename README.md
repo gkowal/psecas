@@ -74,20 +74,27 @@ the descriptions in the books by
 
 # Installation
 
-I assume you have Python 3.6 installed. If so, all requirements are simply
-installed by running the following command
+Psecas requires Python 3.9 or newer. From the top-level directory:
 
 ```
-$ pip install -r requirements.txt
+$ pip install -e .
 ```
-at the top-level directory.
+
+`HermiteGrid` and `LaguerreGrid` additionally need
+[dmsuite](https://github.com/tberlok/dmsuite); `psecas.IO` needs `mpi4py`.
+Both are optional:
+
+```
+$ pip install -e '.[dmsuite,mpi]'
+```
 
 # Testing
 
 Before using the code, the tests should be run to make sure that they are
 working. From the top-level directory
 ```
-$ pytest tests/
+$ pip install -e '.[test]'
+$ pytest
 ```
 
 ### Overview of the code
@@ -113,6 +120,39 @@ Psecas consist of three main classes
       _d_ is the number of equations in the system.
     - solving the eigenvalue problem to a specified tolerance, e.g. 1e-6, of
       the returned eigenvalue.
+
+#### Solver methods
+
+| Method | What it does |
+| --- | --- |
+| `solve` | Full dense solve; returns one mode, chosen by `sorting_strategy`. |
+| `solve_full` | Full dense solve; returns the whole spectrum, unsorted and with no side effects. |
+| `solve_mode` | Shift-invert solve for the single mode nearest a guess. |
+| `iterate_solver` | Sweeps a list of resolutions until one eigenvalue converges. |
+| `iterate_solve_multimode` | Sweeps resolutions tracking several modes at once, switching between full and shift-invert solves. |
+| `filter_modes` | Selects eigenvalues by real/imaginary part. |
+
+Every shift-invert result is checked against its relative residual
+
+&nbsp;&nbsp;&nbsp;&nbsp;‖M₁v − σM₂v‖ / (‖M₁v‖ + |σ|‖M₂v‖)
+
+and a mode that fails raises `ShiftInvertError` rather than being returned.
+The iterative drivers catch it and fall back to a full solve. This matters
+because an unverified shift-invert result tends to sit near the guess it was
+given, which a driver that measures convergence by comparing successive
+eigenvalues will read as convergence.
+
+#### Writing equations
+
+Equations are strings. `dz(f)` and `dz(dz(f))` are first and second
+derivatives, `dz(f, n)` is the n-th. numpy is available, so `sqrt`, `exp`,
+`tanh` and `np.where` can be used directly. Names defined in the system's
+`make_background` are in scope. `add_substitution` introduces shorthands,
+which may be defined in terms of one another.
+
+Boundary conditions are set with `add_boundary(var, lower, upper)`, where
+each side is `'Dirichlet'`, `'Neumann'`, or an expression equal to zero such
+as `'dz(f) - k*f = 0'`.
 
 # Developers
 

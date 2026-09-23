@@ -23,6 +23,8 @@ class HermiteGrid(InfiniteGrid, Grid):
     maxN = 245
 
     def make_grid(self):
+        """Build the nodes zg and the differentiation matrices, then notify
+        any objects bound to this grid."""
 
         # from numpy.polynomial import Hermite as H
         self.NN = self.N

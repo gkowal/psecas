@@ -35,6 +35,8 @@ class ChebyshevTLnGrid(InfiniteGrid, Grid):
         return (zg, d1)
 
     def make_grid(self):
+        """Build the nodes zg and the differentiation matrices, then notify
+        any objects bound to this grid."""
 
         C = self.C
         self.NN = self.N + 1

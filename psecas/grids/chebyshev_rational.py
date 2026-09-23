@@ -42,6 +42,8 @@ class ChebyshevRationalGrid(InfiniteGrid, Grid):
         return s, x, λ, Dx
 
     def make_grid(self):
+        """Build the nodes zg and the differentiation matrices, then notify
+        any objects bound to this grid."""
 
         C = self.C
         self.NN = self.N + 1

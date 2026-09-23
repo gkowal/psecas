@@ -82,6 +82,7 @@ class FourierGrid(Grid):
         return ak
 
     def interpolate(self, z, f):
+        """Evaluate the function sampled as f on self.zg at the points z."""
 
         assert len(f) == self.N
 

@@ -23,6 +23,8 @@ class LaguerreGrid(InfiniteGrid, Grid):
     maxN = 120
 
     def make_grid(self):
+        """Build the nodes zg and the differentiation matrices, then notify
+        any objects bound to this grid."""
 
         # from numpy.polynomial import Laguerre as H
         self.NN = self.N + 1

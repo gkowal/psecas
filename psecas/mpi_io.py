@@ -12,6 +12,14 @@ import socket
 
 
 class IO:
+    """
+    Distribute a parameter sweep over MPI ranks and record what was run.
+
+    Creates the output directory, copies the driving script next to the
+    data, writes a log with the host, git commit and timing, and hands
+    each rank its slice of the problem indices via index_local.
+    """
+
     def __init__(self, system, data_folder, experiment, steps, tag=""):
         """
         Initialisation creates the output directory and saves the path to the
@@ -127,6 +135,7 @@ class IO:
         comm.barrier()
 
     def log(self, i, time, custom_str):
+        """Append a progress line for the i-th local problem."""
         from mpi4py.MPI import COMM_WORLD as comm
 
         # steps_local is zero on ranks that were handed no work, which
@@ -143,12 +152,14 @@ class IO:
             f.write(msg.format(time, comm.rank, percent))
 
     def rank_log(self, string):
+        """Append an arbitrary message to the log, tagged with the rank."""
         from mpi4py.MPI import COMM_WORLD as comm
 
         with open(self.logfile, "a") as f:
             f.write("Rank {}:".format(comm.rank) + string)
 
     def save_system(self, i):
+        """Pickle the current system under its global problem index."""
 
         path = os.path.join(
             self.data_folder,
