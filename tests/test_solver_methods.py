@@ -31,9 +31,25 @@ def test_solver_methods(verbose=False):
 
     np.testing.assert_allclose(1.7814514515967603, sigma, atol=1e-8)
 
-    # Compare with solve without using OPinv
-    solver.solve(useOPinv=False, saveall=True)
+    # Compare against the same result obtained through solve(). Note that
+    # solve() always performs a full dense solve: it used to accept a
+    # useOPinv argument, but never acted on it.
+    solver.solve(saveall=True)
     np.testing.assert_allclose(solver.E[mode], sigma, atol=1e-8)
+
+
+def test_solve_warns_about_the_ignored_useOPinv_argument():
+    import numpy as np
+    import pytest
+    from psecas import Solver, ChebyshevExtremaGrid
+    from psecas.systems.mti import MagnetoThermalInstability
+
+    grid = ChebyshevExtremaGrid(N=32, zmin=0, zmax=1)
+    system = MagnetoThermalInstability(grid, beta=1e5, Kn0=200, kx=4 * np.pi)
+    solver = Solver(grid, system)
+
+    with pytest.deprecated_call():
+        solver.solve(useOPinv=False)
 
 
 

@@ -1,6 +1,16 @@
 from .string_methods import contains_symbol as _contains_symbol
 
 
+class _Unset:
+    """Sentinel for "argument not supplied", distinct from any real value."""
+
+    def __repr__(self):
+        return "<unset>"
+
+
+_UNSET = _Unset()
+
+
 class ShiftInvertError(RuntimeError):
     """
     Raised when a shift-invert solve returns an eigenpair that fails its
@@ -859,7 +869,7 @@ class Solver:
         return Σ_old[mode], V_old[:,mode], errors[mode]
 
 
-    def solve(self, useOPinv=True, verbose=False, mode=0, saveall=False):
+    def solve(self, useOPinv=_UNSET, verbose=False, mode=0, saveall=False):
         """
         Construct and solve the (generalized) eigenvalue problem (EVP)
 
@@ -880,15 +890,30 @@ class Solver:
 
         Optional parameters
 
-        useOPinv (default True): If true, manually calculate OPinv instead of
-        letting eigs do it.
+        useOPinv: ignored, and deprecated. This method always performs a
+        full dense solve, where there is no shift-invert operator to build;
+        the parameter never had an effect. Use solve_mode() for a
+        shift-invert solve, which is where useOPinv is meaningful.
 
         verbose (default False): print out information about the calculation.
 
         mode (default 0): mode=0 is the fastest growing, mode=1 the second
         fastest and so on.
+
+        saveall (default False): also store the full sorted spectrum in
+        self.E and the corresponding eigenvectors in self.v.
         """
+        import warnings
         from scipy.linalg import eig
+
+        if useOPinv is not _UNSET:
+            warnings.warn(
+                "Solver.solve() ignores useOPinv and always performs a full "
+                "dense solve; the parameter has never had an effect. It will "
+                "be removed in a future release. Use solve_mode() for a "
+                "shift-invert solve.",
+                DeprecationWarning, stacklevel=2,
+            )
 
         # Calculate right-hand matrix
         self.get_matrix1()
