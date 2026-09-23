@@ -1,6 +1,67 @@
 from .string_methods import contains_symbol as _contains_symbol
 
 
+def _make_eval_globals():
+    """
+    The global namespace that equation and boundary strings are evaluated in.
+
+    This is a convenience namespace, NOT a security boundary.
+
+    The previous version passed {"__builtins__": {"__import__": ...}} under a
+    comment describing it as "a restricted environment". It was not: exposing
+    __import__ alone is enough to reach anything at all, as
+
+        eval("__import__('os').system(...)", that_namespace)
+
+    demonstrates. It was also actively harmful. Removing the rest of the
+    builtins breaks any expression that emits a warning, because the warning
+    machinery imports through the evaluating frame's builtins:
+
+        ChebyshevExtremaGrid(500, zmin=0, zmax=1, z='r')
+        eval("-2/grid.zg*grid.D(1).T", ...)
+        -> zg contains 0 -> RuntimeWarning -> KeyError: '__import__'
+
+    which is how tests/test_bessel_solutions.py fails. So the pretence is
+    dropped rather than patched up. Equations come from whoever runs the
+    code; eval on input you do not trust cannot be made safe by trimming
+    builtins, and pretending otherwise is worse than not trying, because it
+    invites someone to feed it untrusted input.
+
+    What this namespace is for is convenience: making numpy available under
+    the names people expect when writing an equation, so that sqrt(), tanh()
+    and np.where() work in an equation string or a boundary expression
+    instead of raising NameError.
+    """
+    import builtins
+
+    import numpy as np
+
+    names = {
+        "__builtins__": builtins,
+        "np": np,
+        "numpy": np,
+        "pi": np.pi,
+        "e": np.e,
+        "inf": np.inf,
+    }
+
+    # Elementwise functions people reasonably expect to be able to use in an
+    # equation or a boundary expression.
+    for name in (
+        "sqrt", "exp", "log", "log10", "abs",
+        "sin", "cos", "tan", "arcsin", "arccos", "arctan", "arctan2",
+        "sinh", "cosh", "tanh", "arcsinh", "arccosh", "arctanh",
+        "sign", "real", "imag", "conj", "where", "heaviside",
+        "minimum", "maximum", "hstack", "zeros", "ones", "eye", "diag",
+    ):
+        names[name] = getattr(np, name)
+
+    return names
+
+
+_EVAL_GLOBALS = _make_eval_globals()
+
+
 class _Unset:
     """Sentinel for "argument not supplied", distinct from any real value."""
 
@@ -1373,7 +1434,6 @@ class Solver:
 
 
     def _find_submatrices(self, eq, verbose=False):
-        import builtins
         import numpy as np
         from scipy import sparse
         from .string_methods import var_replace
@@ -1431,8 +1491,9 @@ class Solver:
                     "while attempting to evaluate the terms with: {}"
                     "\nThis caused the following error to occur:\n\n"
                 )
-                # Evaluate the expression in a restricted environment.
-                submat = eval(eq_t, {"__builtins__": {"__import__": builtins.__import__}}, env)
+                # See _make_eval_globals(): a convenience namespace, not a
+                # sandbox.
+                submat = eval(eq_t, dict(_EVAL_GLOBALS), env)
 
             except NameError as e:
                 strerror, = e.args
@@ -1482,7 +1543,6 @@ class Solver:
 
         The Boundary condition on a variable cannot depend on the other independent variables.
         """
-        import builtins
         import numpy as np
         from .string_methods import var_replace
 
@@ -1561,8 +1621,9 @@ class Solver:
                                     "while attempting to evaluate the boundary on: {}"
                                     "\nThis caused the following error to occur:\n\n"
                                 )
-                                # Evaluate the expression in a restricted environment.
-                                submat[index, :] = eval(bound_t, {"__builtins__": {"__import__": builtins.__import__}}, env)
+                                # See _make_eval_globals() on this namespace.
+                                submat[index, :] = eval(
+                                    bound_t, dict(_EVAL_GLOBALS), env)
 
                             except NameError as e:
                                 strerror, = e.args
