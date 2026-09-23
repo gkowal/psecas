@@ -1103,17 +1103,37 @@ class Solver:
 
         # raise RuntimeError("Did not converge!")
 
+    #: Eigenvalues with |Re| or |Im| above this are zeroed by the default
+    #: sorting_strategy, to push the spurious modes that a spectral
+    #: discretization always produces to the bottom of the ordering. The
+    #: right value depends entirely on the problem: growth rates in this
+    #: package range from O(1e-4) for the tearing instability to O(1e2) for
+    #: the channel modes. Set it on the solver, or override
+    #: sorting_strategy() outright, when the default does not fit.
+    sorting_cutoff = 10.0
+
     def sorting_strategy(self, E):
         """
         A default sorting strategy.
 
-        "Large" real and imaginary eigenvalues are removed and the eigenvalues
-        are sorted from largest to smallest
+        Eigenvalues whose real or imaginary part exceeds self.sorting_cutoff
+        in magnitude are zeroed, and the result is sorted from largest to
+        smallest real part.
+
+        Returns (E, index) where E is a *copy* with the large values zeroed,
+        and index orders it. Override this method for problems whose
+        eigenvalues do not sit near unity.
         """
         import numpy as np
 
-        E[np.abs(E.real) > 10.0] = 0
-        E[np.abs(E.imag) > 10.0] = 0
+        # Copy first. This used to modify the caller's array in place, so
+        # merely asking how the solver would sort a spectrum destroyed it.
+        E = np.array(E, copy=True)
+
+        cutoff = self.sorting_cutoff
+        E[np.abs(E.real) > cutoff] = 0
+        E[np.abs(E.imag) > cutoff] = 0
+
         # Sort from largest to smallest eigenvalue
         index = np.argsort(np.real(E))[::-1]
         return (E, index)
