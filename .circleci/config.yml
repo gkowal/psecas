@@ -1,60 +1,55 @@
-# Python CircleCI 2.0 configuration file
+# CircleCI configuration for Psecas.
 #
-# Check https://circleci.com/docs/2.0/language-python/ for more details
-#
+# The previous configuration pinned circleci/python:3.6.1. Python 3.6 reached
+# end of life in December 2021 and the circleci/* image namespace is
+# deprecated in favour of cimg/*. CI was therefore exercising an interpreter
+# nobody runs the code on, while development happens on 3.12+.
 version: 2.1
-orbs:
-  codecov: codecov/codecov@1.0.3
-jobs:
-  build:
-    docker:
-      # specify the version you desire here
-      # use `-browsers` prefix for selenium tests, e.g. `3.6.1-browsers`
-      - image: circleci/python:3.6.1
 
-      # Specify service dependencies here if necessary
-      # CircleCI maintains a library of pre-built images
-      # documented at https://circleci.com/docs/2.0/circleci-images/
-      # - image: circleci/postgres:9.4
+orbs:
+  codecov: codecov/codecov@4.1.0
+
+jobs:
+  test:
+    parameters:
+      python-version:
+        type: string
+    docker:
+      - image: cimg/python:<< parameters.python-version >>
 
     working_directory: ~/repo
 
     steps:
       - checkout
 
-      # Download and cache dependencies
       - restore_cache:
           keys:
-          - v1-dependencies-{{ checksum "requirements.txt" }}
-          # fallback to using the latest cache if no exact match is found
-          - v1-dependencies-
+            - v2-deps-<< parameters.python-version >>-{{ checksum "pyproject.toml" }}
+            - v2-deps-<< parameters.python-version >>-
 
       - run:
-          name: install dependencies
+          name: Install package and test dependencies
           command: |
-            python3 -m venv venv
+            python -m venv venv
             . venv/bin/activate
-            pip install -r requirements.txt
-            pip install pytest-cov
+            python -m pip install --upgrade pip
+            # Install the package itself, so CI tests what users install
+            # rather than whatever happens to be importable from the
+            # working directory.
+            python -m pip install -e '.[test,dmsuite,mpi]'
 
       - save_cache:
           paths:
             - ./venv
-          key: v1-dependencies-{{ checksum "requirements.txt" }}
+          key: v2-deps-<< parameters.python-version >>-{{ checksum "pyproject.toml" }}
 
-      # run tests!
-      # this example uses Django's built-in test-runner
-      # other common Python testing frameworks include pytest and nose
-      # https://pytest.org
-      # https://nose.readthedocs.io
       - run:
-          name: run tests
+          name: Run tests
           command: |
             . venv/bin/activate
-            mkdir test-reports
-            export PYTHONPATH=/home/circleci/repo
-            cd /home/circleci/repo
-            pytest --cov-report=xml --cov=/home/circleci/repo/psecas --junitxml=test-reports/junit.xml /home/circleci/repo/tests 
+            mkdir -p test-reports
+            pytest --cov=psecas --cov-report=xml \
+                   --junitxml=test-reports/junit.xml tests
 
       - store_test_results:
           path: test-reports
@@ -63,5 +58,14 @@ jobs:
           path: test-reports
 
       - codecov/upload:
-          file: /home/circleci/repo/coverage.xml
-      
+          file: coverage.xml
+
+workflows:
+  build:
+    jobs:
+      # Test the oldest supported interpreter and a current one. The
+      # floor is set by requires-python in pyproject.toml.
+      - test:
+          matrix:
+            parameters:
+              python-version: ["3.9", "3.12"]
