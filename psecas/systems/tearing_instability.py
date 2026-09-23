@@ -340,7 +340,8 @@ class TearingGyrotropicMHD:
 			  where Bguide denotes the strength of the guide field,
 	"""
 	def __init__(self, grid, kx=0, ky=0, z1=-0.5, z2=0.5, a=1, \
-				    S=1e4, Pr=0, β=0, Δβ=0, ɣpar=3, ɣper=2, ϵ=0, σ=0, periodic=True):
+				    S=1e4, Pr=0, β=0, Δβ=0, ɣpar=3, ɣper=2, ϵ=0, σ=0, periodic=True,
+				    normalized=False):
 		import numpy as np
 
 		# Validation checks
@@ -386,6 +387,8 @@ class TearingGyrotropicMHD:
 		self.Γ1   = ɣpar + ɣper - 2
 		self.Γ2   = ɣpar - 1
 		self.Γβ   = 0.5 * (self.Γ1 * self.β0 + self.Γ2 * self.Δβ0)
+		self.sqrtG0 = np.sqrt(self.Γβ)
+		self.normalized = normalized
 		self.ϵ    = ϵ
 		self.A    = 1.0 - 0.5 * Δβ
 		self.R0   = 1.0 + 0.5 * ((ɣpar + ɣper - 2) * β + ɣpar * Δβ)
@@ -401,13 +404,31 @@ class TearingGyrotropicMHD:
 		# String used for eigenvalue (do not use lambda!)
 		self.eigenvalue = "sigma"
 
+		# Pressure-anisotropy variable.
+		#
+		# normalized=False uses δΔp directly. normalized=True uses the
+		# rescaled δπ = δΔp / sqrt(Γβ), and divides the δΔp equation through
+		# by sqrt(Γβ), which makes the coupling between the anisotropy and
+		# the momentum equations symmetric: both directions then carry a
+		# factor sqrt(Γβ) instead of one carrying Γβ and the other 1. Note
+		# Γβ/sqrt(Γβ) = sqrt(Γβ), which is why the source term picks up
+		# sqrtG0 rather than losing a factor.
+		#
+		# It is a change of variables, not a change of physics: the two give
+		# the same eigenvalues, and tests/test_tearing_normalization.py pins
+		# that.
+		dp  = "dpi" if normalized else "ddp"
+		g0  = "sqrtG0*" if normalized else ""
+		pre = "sqrtG0" if normalized else "Γβ"
+		div = "/sqrtG0" if normalized else ""
+
 		# Linearized equations for three cases: 1) ky = 0, 2) kx = 0, 3) kx != 0 and ky != 0
 		if np.isclose(ky, 0.0):
 			wy_lhs = "sigma*(dz(duz,2) -kx**2*duz)"
 			wz_lhs = "sigma*duy"
 			by_lhs = "sigma*dby"
 			bz_lhs = "sigma*dbz"
-			dp_lhs = "sigma*kx*ddp"
+			dp_lhs = f"sigma*kx*{dp}"
 
 			wy_rhs_adv = ""
 			wz_rhs_adv = ""
@@ -423,8 +444,8 @@ class TearingGyrotropicMHD:
 				wy_rhs_vis += " +ν*(dz(duz,4) -2*kx**2*dz(duz,2) +kx**4*duz)"
 				wz_rhs_vis += " +ν*(dz(duy,2) -kx**2*duy)"
 			if not self.isothermal:
-				wy_rhs_ani += " -kx**2*Bx*(Bx*dz(ddp) +2*By**2/δ*ddp)"
-				wz_rhs_ani += " -1j*kx*Bx*By*ddp"
+				wy_rhs_ani += f" -kx**2*Bx*{g0}(Bx*dz({dp}) +2*By**2/δ*{dp})"
+				wz_rhs_ani += f" -1j*kx*Bx*By*{g0}{dp}"
 			if not np.isclose(self.Δβh, 0.0):
 				wy_rhs_ani += " -Δβh*kx*Bx*(1j*(1 -2*Bx**2)*dz(dbz,2)" \
 							+ " -6j*Bx*By**2/δ*dz(dbz) +1j*(2*By**2/δ**2 -kx**2)*dbz" \
@@ -443,8 +464,8 @@ class TearingGyrotropicMHD:
 
 			if not self.isothermal:
 				dp_rhs_adv = ""
-				dp_rhs_str = " +Γβ*kx*Bx*(Bx*dz(duz) -1j*kx*By*duy)"
-				dp_rhs_res = " +2*η*Γ2*By/δ*(1j*By*(dz(dbz,2) -kx**2*dbz) -kx*Bx*dz(dby))"
+				dp_rhs_str = f" +{pre}*kx*Bx*(Bx*dz(duz) -1j*kx*By*duy)"
+				dp_rhs_res = f" +2*η*Γ2*By/δ*(1j*By*(dz(dbz,2) -kx**2*dbz) -kx*Bx*dz(dby)){div}"
 				dp_rhs_vis = ""
 
 			wy_eq = f"{wy_lhs} ={wy_rhs_adv}{wy_rhs_pre}{wy_rhs_lor}{wy_rhs_vis}{wy_rhs_ani}"
@@ -464,13 +485,13 @@ class TearingGyrotropicMHD:
 				]
 				self.equations = [wz_eq, wy_eq, by_eq, bz_eq]
 			else:
-				self.variables = ["duz", "dbz", "duy", "dby", "ddp"]
+				self.variables = ["duz", "dbz", "duy", "dby", dp]
 				self.labels = [
 					r"$\delta u_z$",
 					r"$\delta B_z$",
 					r"$\delta u_y$",
 					r"$\delta B_y$",
-					r"$\delta \Delta p$",
+					r"$\delta \pi$" if normalized else r"$\delta \Delta p$",
 				]
 				self.equations = [wy_eq, bz_eq, wz_eq, by_eq, dp_eq]
 
