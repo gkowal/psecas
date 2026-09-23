@@ -40,17 +40,51 @@ instability system this was measured at **82 % relative error with a reported Δ
 
 | # | Severity | Finding | Status |
 |---|---|---|---|
-| C1 | **Critical** | Generalised shift-invert returns the shift, not the eigenvalue → silent false convergence | Confirmed |
-| C2 | **Critical** | `solve_with_guess` omits `M=mat2` in the generalised path | Confirmed |
-| C3 | **Critical** | Parser drops variables that appear only inside a substitution | Confirmed |
-| H1 | High | `var_replace` mangles identifiers containing digits/underscores | Confirmed |
-| H2 | High | `plot_solution` crashes on current Matplotlib | Confirmed |
-| H3 | High | `add_equation` silently discards equations with no variable on the LHS | Confirmed |
-| H4 | High | Grid pickle round-trip destroys the differentiation matrices irrecoverably | Confirmed |
-| H5 | High | `prolongate_eigenvector` corrupts endpoint values on non-Dirichlet grids | Confirmed |
-| H6 | High | Boundary conditions on `FourierGrid`/`HermiteGrid` silently produce wrong matrices | Confirmed |
-| M1–M12 | Medium | See §5 | Mixed |
-| L1–L10 | Low | See §6 | — |
+| C1 | **Critical** | Generalised shift-invert returns the shift, not the eigenvalue → silent false convergence | **Fixed** `de26e68` |
+| C2 | **Critical** | `solve_with_guess` omits `M=mat2` in the generalised path | **Fixed** `d07d92c` |
+| C3 | **Critical** | Parser drops variables that appear only inside a substitution | **Fixed** `802a6ea` |
+| H1 | High | `var_replace` mangles identifiers containing digits/underscores | **Fixed** `e47d221` |
+| H2 | High | `plot_solution` crashes on current Matplotlib | **Fixed** `7a63e7e` |
+| H3 | High | `add_equation` silently discards equations with no variable on the LHS | **Fixed** `ec6396b` |
+| H4 | High | Grid pickle round-trip destroys the differentiation matrices irrecoverably | **Fixed** `204ec1f` |
+| H5 | High | `prolongate_eigenvector` corrupts endpoint values on non-Dirichlet grids | **Fixed** `649cef0` |
+| H6 | High | Boundary conditions on `FourierGrid`/`HermiteGrid` silently produce wrong matrices | **Fixed** `a35c76d` |
+| M1–M12 | Medium | See §5 | **All fixed** |
+| L1–L10 | Low | See §6 | **All fixed except L6 (examples)** |
+
+### Resolution
+
+All findings are addressed on branch `fix/audit-findings`, one commit per
+finding. The suite grew from 55 tests (1 failing) to 196 (all passing), and
+coverage exclusions were removed so `plotting.py`, `serial_io.py` and
+`mpi_io.py` are now measured.
+
+| Finding | Commit | Finding | Commit |
+|---|---|---|---|
+| M1 | `de26e68` | M7 | `7a567c4` |
+| M2 | `208a488` | M8 | `3f5f764` |
+| M3 | `8dfde4a` | M9 | `c14ce58` |
+| M4 | `5d0190a` | M10 | `deb9801` |
+| M5 | `b7a613e` | M11 | `90a2c91` |
+| M6 | `7a567c4` | M12 | `86ad5ac` |
+| L1, L2 | `7b205ee` | L6 (systems) | `488e04e` |
+| L3 | `0417efb` | L7 | `311ef6d` |
+| L4 | `18b0959` | L8 | `7e3db33` |
+| L5 | `cdb6d8e` | L9 | `e287299` |
+| L6 (grids) | `ebf8b6b` | L10 | `cbf36ce` |
+
+**Deliberately not done — L6, third bullet.** The five near-variant driver
+scripts under `examples/tearing-instability/` are left as they are.
+Consolidating them means rewriting the scripts that reproduce published
+figures, and choosing which variant is canonical is a judgement about the
+research, not about the code. The duplication is noted; the decision is
+yours.
+
+A defect not in the original audit was found while checking the examples
+against the fixed API and is fixed in `2fd398b`: those same scripts called
+`iterate_solver` with `iterate_solve_multimode`'s arguments and would all
+have raised `TypeError` on first use. One of the arguments they passed,
+`allgrids`, existed in no method at all and has been implemented.
 
 ---
 
