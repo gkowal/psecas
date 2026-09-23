@@ -1,7 +1,7 @@
-from psecas.grids.grid import Grid
+from psecas.grids.grid import Grid, InfiniteGrid
 
 
-class SincGrid(Grid):
+class SincGrid(InfiniteGrid, Grid):
     """
         This grid uses Whittaker Cardinal or “Sinc” functions on z ∈ [-∞, ∞]
         to dicretize the system. See Boyd Appendix F.7 page 569.
@@ -16,47 +16,6 @@ class SincGrid(Grid):
         The domain is in theory [-∞, ∞] but in practice the minimum and
         maximum values of the grid depend on both N and C.
     """
-
-    def __init__(self, N, C=1, z='z', max_derivative_order=2):
-        self._observers = []
-
-        self._N = N
-        self._C = C
-        self._d = []
-        self._max_derivative_order = int(max_derivative_order)
-        self.make_grid()
-
-        # Grid variable name
-        self.z = z
-
-    def bind_to(self, callback):
-        self._observers.append(callback)
-
-    @property
-    def N(self):
-        return self._N
-
-    @N.setter
-    def N(self, value):
-        self._N = value
-        self.make_grid()
-
-    @property
-    def zmin(self):
-        return self.zg.min()
-
-    @property
-    def zmax(self):
-        return self.zg.max()
-
-    @property
-    def C(self):
-        return self._C
-
-    @C.setter
-    def C(self, value):
-        self._C = value
-        self.make_grid()
 
     @property
     def dz(self):

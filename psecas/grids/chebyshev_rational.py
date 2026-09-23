@@ -1,7 +1,7 @@
-from psecas.grids.grid import Grid
+from psecas.grids.grid import Grid, InfiniteGrid
 
 
-class ChebyshevRationalGrid(Grid):
+class ChebyshevRationalGrid(InfiniteGrid, Grid):
     """
         This grid uses Rational Chebyshev functions on z ∈ [-∞, ∞],
         the TBn(z) functions, to dicretize the system (Boyd page 356 and
@@ -17,47 +17,6 @@ class ChebyshevRationalGrid(Grid):
         The domain is in theory [-∞, ∞] but in practice the minimum and
         maximum values of the grid depend on both N and C.
     """
-
-    def __init__(self, N, C=1, z="z", max_derivative_order=2):
-        self._observers = []
-
-        self._N = N
-        self._C = C
-        self._max_derivative_order = int(max_derivative_order)
-        self._d = []
-        self.make_grid()
-
-        # Grid variable name
-        self.z = z
-
-    def bind_to(self, callback):
-        self._observers.append(callback)
-
-    @property
-    def N(self):
-        return self._N
-
-    @N.setter
-    def N(self, value):
-        self._N = value
-        self.make_grid()
-
-    @property
-    def zmin(self):
-        return self.zg.min()
-
-    @property
-    def zmax(self):
-        return self.zg.max()
-
-    @property
-    def C(self):
-        return self._C
-
-    @C.setter
-    def C(self, value):
-        self._C = value
-        self.make_grid()
 
     def cheb_gauss_nodes_and_Dx(self, N):
         import numpy as np

@@ -1,3 +1,53 @@
+class InfiniteGrid:
+    """
+    Mixin for grids on an infinite or semi-infinite domain.
+
+    These grids have no user-chosen endpoints. Their extent follows from the
+    resolution N and a scaling parameter C, so zmin and zmax are read off the
+    nodes instead of being stored, and change when either is changed.
+
+    This collects the constructor, the C property and the zmin/zmax
+    properties that ChebyshevRationalGrid, SincGrid, HermiteGrid,
+    LaguerreGrid and ChebyshevTLnGrid each carried their own identical copy
+    of - about forty duplicated lines apiece, which is how Grid.__getstate__
+    came to be written against a layout none of them actually shared.
+    """
+
+    def __init__(self, N, C=1, z="z", max_derivative_order=2):
+        self._observers = []
+
+        self._validate_N(N)
+
+        self._N = N
+        self._C = C
+        self._max_derivative_order = int(max_derivative_order)
+        self._d = []
+
+        # Grid variable name; set before make_grid() for the reason given
+        # in Grid.__init__.
+        self.z = z
+
+        self.make_grid()
+
+    @property
+    def zmin(self):
+        return self.zg.min()
+
+    @property
+    def zmax(self):
+        return self.zg.max()
+
+    @property
+    def C(self):
+        """Scaling parameter controlling how far the grid reaches."""
+        return self._C
+
+    @C.setter
+    def C(self, value):
+        self._C = value
+        self.make_grid()
+
+
 def _barycentric_weights(x):
     """
     Barycentric weights w_j = 1 / prod_{k != j} (x_j - x_k).
@@ -74,17 +124,24 @@ class Grid:
     def __init__(self, N, zmin, zmax, z='z', max_derivative_order=2):
         self._observers = []
 
-        assert zmax > zmin
+        if zmax <= zmin:
+            raise ValueError(
+                "zmax must be greater than zmin, got zmin={}, zmax={}"
+                .format(zmin, zmax)
+            )
+        self._validate_N(N)
 
         self._N = N
         self._zmin = zmin
         self._zmax = zmax
         self._max_derivative_order = int(max_derivative_order)
         self._d = []
-        self.make_grid()
 
-        # Grid variable name
+        # Grid variable name. Set before make_grid(), which notifies the
+        # objects bound to this grid and so can reach code that reads it.
         self.z = z
+
+        self.make_grid()
 
     def __getstate__(self):
         """
@@ -155,6 +212,11 @@ class Grid:
     #: nodes wrap around and which therefore have no boundary to speak of.
     periodic = False
 
+    #: Largest N this grid can be built at, or None for no limit. The
+    #: dmsuite-backed grids have one because the underlying routines lose
+    #: accuracy or overflow beyond it.
+    maxN = None
+
     #: Whether the grid interpolates with polynomials through distinct nodes
     #: on a finite domain. Such grids can build high-order differentiation
     #: matrices with the barycentric recursion instead of by composition.
@@ -163,6 +225,14 @@ class Grid:
     @property
     def L(self):
         return self.zmax - self.zmin
+
+    def _validate_N(self, value):
+        """Reject a resolution the grid cannot be built at."""
+        if self.maxN is not None and value > self.maxN:
+            raise ValueError(
+                "N = {} requested for {}, but the maximum it supports is {}."
+                .format(value, type(self).__name__, self.maxN)
+            )
 
     def bind_to(self, callback):
         self._observers.append(callback)
@@ -200,6 +270,7 @@ class Grid:
 
     @N.setter
     def N(self, value):
+        self._validate_N(value)
         self._N = value
         self.make_grid()
 

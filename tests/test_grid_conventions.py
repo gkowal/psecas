@@ -97,3 +97,67 @@ def test_dirichlet_spectrum_is_correct_on_a_grid_with_NN_equal_N():
 
     assert np.isfinite(E).any()
     assert solver.mat1.shape == (grid.NN - 2, grid.NN - 2)
+
+
+@pytest.mark.parametrize("make_grid", [
+    pytest.param(lambda: __import__('psecas').ChebyshevRationalGrid(32, C=2, z='x'),
+                 id="ChebyshevRational"),
+    pytest.param(lambda: __import__('psecas').SincGrid(32, C=2, z='x'), id="Sinc"),
+    pytest.param(lambda: __import__('psecas').HermiteGrid(32, C=2, z='x'), id="Hermite"),
+    pytest.param(lambda: __import__('psecas').LaguerreGrid(32, C=2, z='x'), id="Laguerre"),
+    pytest.param(lambda: __import__('psecas').ChebyshevTLnGrid(32, C=2, z='x'),
+                 id="ChebyshevTLn"),
+])
+def test_infinite_grids_share_one_implementation(make_grid):
+    """
+    The five infinite grids used to carry their own identical copies of the
+    constructor and the C / zmin / zmax properties. They now inherit them.
+    """
+    from psecas.grids.grid import InfiniteGrid
+
+    grid = make_grid()
+
+    assert isinstance(grid, InfiniteGrid)
+    assert grid.z == 'x'
+    assert grid.C == 2
+    assert grid.zmin == grid.zg.min()
+    assert grid.zmax == grid.zg.max()
+
+
+@pytest.mark.parametrize("make_grid", [
+    pytest.param(lambda: __import__('psecas').ChebyshevRationalGrid(32), id="ChebyshevRational"),
+    pytest.param(lambda: __import__('psecas').SincGrid(32), id="Sinc"),
+    pytest.param(lambda: __import__('psecas').HermiteGrid(32), id="Hermite"),
+    pytest.param(lambda: __import__('psecas').LaguerreGrid(32), id="Laguerre"),
+    pytest.param(lambda: __import__('psecas').ChebyshevTLnGrid(32), id="ChebyshevTLn"),
+])
+def test_changing_C_rebuilds_the_grid(make_grid):
+    grid = make_grid()
+    before = np.array(grid.zg)
+
+    grid.C = 4
+
+    assert not np.allclose(np.array(grid.zg), before)
+
+
+@pytest.mark.parametrize("grid_cls, maxN", [("HermiteGrid", 245), ("LaguerreGrid", 120)])
+def test_dmsuite_grids_reject_too_large_N(grid_cls, maxN):
+    """
+    The limit used to be enforced with an assert, which python -O strips.
+    """
+    import psecas
+
+    cls = getattr(psecas, grid_cls)
+
+    with pytest.raises(ValueError, match="maximum"):
+        cls(maxN + 1)
+
+    grid = cls(16)
+    with pytest.raises(ValueError, match="maximum"):
+        grid.N = maxN + 1
+
+
+def test_grid_rejects_an_inverted_domain():
+    """Also an assert previously, and so also removed under python -O."""
+    with pytest.raises(ValueError, match="zmax must be greater"):
+        ChebyshevExtremaGrid(16, 1.0, 0.0)
