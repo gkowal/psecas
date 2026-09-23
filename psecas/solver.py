@@ -120,6 +120,10 @@ class Solver:
             system.extra_binfo = extra_binfo
 
 
+        # Reject names that would collide with the solver's own before
+        # anything tries to parse or store them.
+        self._check_reserved_names()
+
         # Boundary conditions address the first and last grid node. On a
         # periodic grid those are interior points that happen to sit at the
         # ends of the array, so imposing conditions there is meaningless.
@@ -139,6 +143,36 @@ class Solver:
         # Check if we need to solve a generalized evp
         self.check_if_evp_or_gevp(verbose=False)
 
+
+    #: Names that cannot be used for a variable or the eigenvalue.
+    #:
+    #: "mode", "converged", "error", "r_err" and "a_err" are metadata keys
+    #: that keep_result() and the iterative drivers write into system.result
+    #: alongside the eigenmode profiles, so a variable of that name would
+    #: have its profile silently overwritten. "grid" is additionally the name
+    #: the Grid object is bound to in the namespace equations are evaluated
+    #: in, so a variable called "grid" shadows it and the equation fails to
+    #: parse with an unrelated-looking AttributeError.
+    RESERVED_NAMES = frozenset(
+        {"mode", "converged", "error", "grid", "r_err", "a_err"}
+    )
+
+    def _check_reserved_names(self):
+        """Reject variable and eigenvalue names that collide with our own."""
+        clashes = sorted(self.RESERVED_NAMES.intersection(
+            self.system.variables))
+        if self.system.eigenvalue in self.RESERVED_NAMES:
+            clashes.append(self.system.eigenvalue)
+
+        if clashes:
+            raise ValueError(
+                "The name(s) {} cannot be used for a variable or for the "
+                "eigenvalue. Psecas stores eigenmode profiles in "
+                "system.result keyed by variable name, next to the metadata "
+                "keys {}, and binds the grid to the name 'grid' when "
+                "evaluating equations. Please rename."
+                .format(clashes, sorted(self.RESERVED_NAMES))
+            )
 
     def check_if_evp_or_gevp(self, verbose=False):
         """

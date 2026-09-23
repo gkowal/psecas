@@ -95,3 +95,47 @@ def test_boundary_expression_without_an_equal_sign_is_reported(grid):
 def test_boundary_expression_with_a_nonzero_rhs_is_reported(grid):
     with pytest.raises(ValueError, match="must be zero"):
         _build_with_boundary(grid, "dz(f) = g", "dz(f) = 0")
+
+
+@pytest.mark.parametrize("name", ["mode", "converged", "error", "grid",
+                                  "r_err", "a_err"])
+def test_variable_named_like_solver_metadata_is_refused(grid, name):
+    """
+    Eigenmode profiles and solver metadata share one dict, so a variable
+    named 'mode' used to have its profile silently overwritten. A variable
+    named 'grid' additionally shadows the Grid object in the namespace
+    equations are evaluated in, and failed with an unrelated-looking
+    AttributeError from deep inside the parser.
+
+    The check belongs at construction: by the time keep_result runs, the
+    equation has already been parsed.
+    """
+    from psecas import Solver
+
+    system = _Laplace(grid, variables=[name], eigenvalue='sigma')
+    system.add_equation("sigma*{0} = q*dz(dz({0}))".format(name), boundary=True)
+
+    with pytest.raises(ValueError, match="cannot be used"):
+        Solver(grid, system)
+
+
+def test_reserved_eigenvalue_name_is_refused(grid):
+    from psecas import Solver
+
+    system = _Laplace(grid, variables=['f'], eigenvalue='error')
+    system.add_equation("error*f = q*dz(dz(f))", boundary=True)
+
+    with pytest.raises(ValueError, match="cannot be used"):
+        Solver(grid, system)
+
+
+def test_ordinary_variable_names_are_unaffected(grid):
+    from psecas import Solver
+
+    system = _Laplace(grid, variables=['f'], eigenvalue='sigma')
+    system.add_equation("sigma*f = q*dz(dz(f))", boundary=True)
+
+    Solver(grid, system).solve()
+
+    assert 'f' in system.result
+    assert len(system.result['f']) == grid.NN
