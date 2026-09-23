@@ -1,9 +1,32 @@
-__pycache__
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
 .pytest_cache/
 .cache
+.benchmarks/
+
+# Packaging / test / coverage artefacts
+*.egg-info/
+build/
+dist/
+.coverage
+coverage.xml
+test-reports/
+
+# Editor / OS
 .DS_Store
+
+# Calculation output. These are deliberately broad because psecas writes
+# figures, pickled systems and Athena tables next to the driving script.
+# Note that they are patterns for *generated* output: a file that belongs in
+# the repository can still be added with `git add -f`.
 *.pdf
 *.eps
+*.png
 *.p
 *.log
-*.txt
+
+# Local agent/tooling configuration. Untracked because the file in here
+# contains absolute paths specific to one machine (~/.venv, /home/...).
+# Remove this entry if the guidance is generalised and worth sharing.
+.agents/

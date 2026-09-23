@@ -659,12 +659,34 @@ class Solver:
         return V_new
 
 
+    def plot_eigenmodes(self, sigma, errors=None, filename=None, **kwargs):
+        """
+        Plot the eigenvalues of the current problem in the complex plane.
+
+        A thin wrapper around psecas.plotting.plot_eigenvalues that fills in
+        a title from the system's wavenumber and the current resolution. Pass
+        filename to save instead of showing; any further keyword arguments go
+        through to plot_eigenvalues (xlim, ylim, logx, num, title).
+        """
+        from .plotting import plot_eigenvalues
+
+        if 'title' not in kwargs:
+            kx = getattr(self.system, 'kx', None)
+            if kx is None:
+                kwargs['title'] = 'Eigenmodes (N={})'.format(self.grid.N)
+            else:
+                kwargs['title'] = 'Eigenmodes (k={:.2e}, N={})'.format(
+                    kx, self.grid.N)
+
+        return plot_eigenvalues(sigma, errors=errors, filename=filename,
+                                **kwargs)
+
     def iterate_solve_multimode(self, Ns, maxmode=None, allmodes=False,
                        rtol=1e-6, atol=1e-14, gtol=1e-2,
                        orderby='tolerance', metric="complex",
                        re_range=None, im_range=None, require_re_positive=True,
                        useOPinv=True, useEVguess=True, verbose=False,
-                       residual_tol=1e-6):
+                       residual_tol=1e-6, plots=False, plot_dir=None):
         """
         Iteratively solve the eigenvalue problem over a sequence of
         increasing grid resolutions using a multimode, hybrid strategy.
@@ -828,6 +850,17 @@ class Solver:
                 index = np.argsort(errors)
             return errors[index], deltas[index], index
 
+        def _plot(Σ, errors=None):
+            """Save a spectrum snapshot for this resolution."""
+            import os
+
+            kx = getattr(self.system, 'kx', 0.0)
+            name = 'eigenmodes_k{:.6e}N{:04d}.png'.format(kx, self.grid.N)
+            if plot_dir is not None:
+                os.makedirs(plot_dir, exist_ok=True)
+                name = os.path.join(plot_dir, name)
+            self.plot_eigenmodes(Σ, errors=errors, filename=name)
+
         # Helper: choose selected index and how many modes to return
         def _select(Nmodes, maxmode, allmodes):
             if Nmodes <= 0:
@@ -867,6 +900,9 @@ class Solver:
             else:
                 index = np.argsort(np.abs(Σ_old))[::-1]
             _print_modes(Σ_old[index], self.grid.N)
+
+        if plots:
+            _plot(Σ_old)
 
         mode, modes = _select(Σ_old.size, maxmode, allmodes)
 
@@ -928,6 +964,9 @@ class Solver:
 
             Σ_new = Σ_new[index]
             V_new = V_new[:,index]
+
+            if plots:
+                _plot(Σ_new, errors=errors)
 
             mode, modes = _select(Σ_new.size, maxmode, allmodes)
 

@@ -105,3 +105,78 @@ def test_get_2Dmap_x_grid_matches_requested_window():
     # call succeeds and produces the requested shape.
     assert val.shape == (16, Nx)
     assert np.allclose(val, val[:, :1])
+
+
+def test_plot_eigenvalues(tmp_path):
+    import numpy as np
+    from psecas import plot_eigenvalues
+
+    sigma = np.array([1 + 0.5j, 2 - 0.3j, 0.1 + 0j])
+    out = tmp_path / "spectrum.png"
+
+    fig = plot_eigenvalues(sigma, filename=str(out))
+
+    assert out.stat().st_size > 0
+    assert len(fig.axes) >= 1
+
+
+def test_plot_eigenvalues_with_errors(tmp_path):
+    import numpy as np
+    from psecas import plot_eigenvalues
+
+    sigma = np.array([1 + 0.5j, 2 - 0.3j, 0.1 + 0j])
+    errors = np.array([1e-3, 1e-1, 1e1])
+
+    fig = plot_eigenvalues(sigma, errors=errors,
+                           filename=str(tmp_path / "coloured.png"))
+
+    # scatter axis plus the colorbar axis
+    assert len(fig.axes) == 2
+
+
+def test_plot_eigenvalues_handles_non_finite_errors(tmp_path):
+    """The driver reports inf when no error estimate is available yet."""
+    import numpy as np
+    from psecas import plot_eigenvalues
+
+    sigma = np.array([1 + 0j, 2 + 0j])
+    errors = np.array([np.inf, np.inf])
+
+    plot_eigenvalues(sigma, errors=errors, filename=str(tmp_path / "inf.png"))
+
+
+def test_solver_plot_eigenmodes_titles_without_kx(tmp_path):
+    """A system with no kx attribute must still plot."""
+    system = _single_variable_system()
+    solver = Solver(system.grid, system)
+    assert not hasattr(system, 'kx')
+
+    fig = solver.plot_eigenmodes(np.array([1 + 0j]),
+                                 filename=str(tmp_path / "nokx.png"))
+
+    assert "N=" in fig.axes[0].get_title()
+
+
+def test_multimode_can_write_spectrum_plots(tmp_path):
+    from psecas.systems.mti import MagnetoThermalInstability
+
+    grid = ChebyshevExtremaGrid(N=32, zmin=0, zmax=1)
+    system = MagnetoThermalInstability(grid, beta=1e5, Kn0=200, kx=4 * np.pi)
+    solver = Solver(grid, system)
+
+    solver.iterate_solve_multimode([32, 48], orderby='real',
+                                   plots=True, plot_dir=str(tmp_path))
+
+    assert list(tmp_path.glob("eigenmodes_*.png"))
+
+
+def test_multimode_writes_no_plots_by_default(tmp_path, monkeypatch):
+    from psecas.systems.mti import MagnetoThermalInstability
+
+    monkeypatch.chdir(tmp_path)
+    grid = ChebyshevExtremaGrid(N=32, zmin=0, zmax=1)
+    system = MagnetoThermalInstability(grid, beta=1e5, Kn0=200, kx=4 * np.pi)
+
+    Solver(grid, system).iterate_solve_multimode([32, 48], orderby='real')
+
+    assert not list(tmp_path.glob("*.png"))

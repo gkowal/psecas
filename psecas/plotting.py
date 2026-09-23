@@ -77,6 +77,65 @@ def plot_solution(system, filename=None, num=1, smooth=True, limits=None):
     return fig
 
 
+def plot_eigenvalues(sigma, errors=None, filename=None, num=1, title=None,
+                     xlim=None, ylim=None, logx=False):
+    """
+    Scatter the eigenvalues in the complex plane, optionally coloured by a
+    per-mode error estimate.
+
+    Useful while developing a new problem: it shows at a glance where the
+    physical modes sit relative to the spurious ones a spectral
+    discretization always produces.
+
+    sigma:    array of eigenvalues
+    errors:   optional per-mode errors, used to colour the points (log scale)
+    filename: save here instead of showing
+    num:      matplotlib figure number to draw into
+    title:    figure title
+    xlim/ylim: axis limits; autoscaled when not given
+    logx:     use a logarithmic real axis, for growth rates spanning decades
+
+    Returns the matplotlib Figure.
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import LogNorm
+
+    sigma = np.asarray(sigma).reshape(-1)
+
+    fig, ax = plt.subplots(num=num, figsize=(6, 6), clear=True)
+
+    if errors is not None:
+        errors = np.asarray(errors).reshape(-1)
+        finite = errors[np.isfinite(errors) & (errors > 0)]
+        if finite.size:
+            norm = LogNorm(finite.min(), finite.max())
+        else:
+            norm = None
+        sc = ax.scatter(sigma.real, sigma.imag, c=errors, cmap='viridis',
+                        marker='o', norm=norm)
+        fig.colorbar(sc, ax=ax, label='error')
+    else:
+        ax.scatter(sigma.real, sigma.imag, marker='o')
+
+    ax.set_xlabel('Real part')
+    ax.set_ylabel('Imaginary part')
+    if logx:
+        ax.set_xscale('log')
+    if xlim is not None:
+        ax.set_xlim(*xlim)
+    if ylim is not None:
+        ax.set_ylim(*ylim)
+    if title is not None:
+        ax.set_title(title)
+
+    if filename is not None:
+        fig.savefig(filename, bbox_inches='tight')
+    else:
+        plt.show()
+
+    return fig
+
+
 def get_2Dmap(system, var, xmin, xmax, Nx, Nz, zmin=None, zmax=None, time=0):
     """Create a 2D map of the eigenmode var stored in system.result[var].
        This function assumes that the eigenmodes have the form
