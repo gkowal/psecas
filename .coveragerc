@@ -1,5 +1,3 @@
 [run]
 source=psecas
 
-omit =
-	./psecas/mpi_io.py
