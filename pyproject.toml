@@ -49,6 +49,13 @@ dmsuite = [
     "dmsuite @ git+https://github.com/tberlok/dmsuite.git@0c02f23bf4f08ea82d54da1abb542b56908970d0",
 ]
 mpi = ["mpi4py"]
+# GPU dense eigensolver (psecas.dense_eig), CuPy >= 14 for cupy.linalg.eig.
+# CuPy wheels are built per CUDA major version and pip cannot detect it, so
+# pick the extra that matches the "CUDA Version" nvidia-smi reports, and
+# install only one. The ctk extra brings the CUDA runtime libraries from pip,
+# so only an NVIDIA driver is needed (>= 580 for CUDA 13).
+gpu = ["cupy-cuda13x[ctk]>=14"]
+gpu-cuda12 = ["cupy-cuda12x[ctk]>=14"]
 test = ["pytest", "pytest-cov"]
 
 [project.urls]
