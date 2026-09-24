@@ -1,4 +1,5 @@
 from .string_methods import contains_symbol as _contains_symbol
+from . import dense_eig
 from numpy.linalg import inv
 from scipy import sparse
 from scipy.linalg import eig, lu_factor, lu_solve
@@ -220,6 +221,12 @@ class Solver:
         are the most accurate, so it should lie in the region of interest
         but not on an eigenvalue; the default avoids the real and imaginary
         axes, where marginal and purely growing modes sit.
+    backend : {"auto", "cupy", "scipy"} (default "auto")
+        Dense eigensolver used by solve() and solve_full(). "auto" uses
+        CuPy on the GPU when it is available and the matrix has at least
+        ``gpu_min_size`` rows, and SciPy otherwise; the environment
+        variable PSECAS_EIG_BACKEND overrides it. See psecas.dense_eig.
+        Stored as ``self.backend`` and may be changed afterwards.
 
     Main entry points
     -----------------
@@ -243,7 +250,7 @@ class Solver:
     GEVP_RESIDUAL_TOL = 1e-9
 
     def __init__(self, grid, system, do_gen_evp=False, gevp_method='qz',
-                 gevp_shift=None):
+                 gevp_shift=None, backend="auto"):
 
         if gevp_method not in self.GEVP_METHODS:
             raise ValueError(
@@ -262,6 +269,16 @@ class Solver:
         # do_gen_evp, if True, do the full generalized evp even though
         # an evp might be sufficient (default False)
         self.do_gen_evp = do_gen_evp
+
+        # Dense eigensolver backend. Validated here so a typo fails at
+        # construction; the PSECAS_EIG_BACKEND override is applied at solve
+        # time, so changing the environment or self.backend later works.
+        dense_eig.resolve_backend(backend)
+        self.backend = backend
+        # Smallest matrix dimension "auto" sends to the GPU.
+        self.gpu_min_size = dense_eig.GPU_MIN_SIZE
+        # Backend that produced the last dense solve ("cupy" or "scipy").
+        self.last_backend = None
 
         # Check that variable names are unique, i.e., that variables
         # are not a substring of another variable
@@ -394,6 +411,13 @@ class Solver:
         -----
         This function intentionally performs *no* sorting/filtering and has no
         side-effects (does not call keep_result and does not write self.E/self.v).
+
+        The eigensolver is chosen by self.backend (see psecas.dense_eig);
+        self.last_backend records which one ran. The eigenvalue order is
+        backend-specific, and the GPU path returns +inf with a zero
+        eigenvector for each infinite eigenvalue of a generalized EVP.
+        gevp_method='shift-invert' always runs on SciPy, whatever
+        self.backend says.
         """
 
         self.get_matrix1()
@@ -412,13 +436,18 @@ class Solver:
 
         A = self.mat1.toarray()
         if not self.do_gen_evp:
-            return eig(A)
+            Σ, V, self.last_backend = dense_eig.eig(
+                A, backend=self.backend, min_size=self.gpu_min_size,
+                return_backend=True)
+            return Σ, V
 
         B = self.mat2.toarray()
         if self.gevp_method == 'shift-invert':
+            # Shift-invert always runs on SciPy, whatever self.backend says.
             result = _eig_shift_invert(A, B, self.gevp_shift,
                                        self.GEVP_RESIDUAL_TOL)
             if result is not None:
+                self.last_backend = "scipy"
                 return result
             warnings.warn(
                 "The shift-invert dense solve (gevp_shift={}) failed its "
@@ -426,8 +455,16 @@ class Solver:
                 .format(self.gevp_shift),
                 RuntimeWarning, stacklevel=3,
             )
+            # The QZ fallback stays on SciPy too: the pencils that fail
+            # shift-invert are the badly scaled ones.
+            Σ, V, self.last_backend = dense_eig.eig(
+                A, B, backend="scipy", return_backend=True)
+            return Σ, V
 
-        return eig(A, B)
+        Σ, V, self.last_backend = dense_eig.eig(
+            A, B, backend=self.backend, min_size=self.gpu_min_size,
+            return_backend=True)
+        return Σ, V
 
 
     def solve_mode(self, guess, v0=None, useOPinv=True, verbose=False,

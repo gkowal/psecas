@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 import scipy.linalg
 
-from psecas import dense_eig
+from psecas import ChebyshevExtremaGrid, Solver, System, dense_eig
 
 gpu = pytest.mark.skipif(not dense_eig.cupy_available(),
                          reason="needs CuPy with a CUDA GPU")
@@ -54,12 +54,22 @@ def _constrained_pencil(n=60, k=4, seed=0, complex_=True):
     return A, B
 
 
+def _well_solver(N, backend):
+    """Infinite well written so that Psecas solves a generalized EVP whose
+    B has zero rows at the two Dirichlet boundaries."""
+    grid = ChebyshevExtremaGrid(N=N, zmin=0, zmax=1, z='x')
+    system = System(grid, variables='phi', eigenvalue='E')
+    system.add_equation("-E*phi = -1/2*dx(dx(phi))", boundary=True)
+    return Solver(grid, system, do_gen_evp=True, backend=backend)
+
 
 # -- backend selection -------------------------------------------------------
 
 def test_invalid_backend_is_rejected():
     with pytest.raises(ValueError):
         dense_eig.resolve_backend("gpu")
+    with pytest.raises(ValueError):
+        _well_solver(16, backend="cuda")
 
 
 def test_environment_overrides_auto_only(monkeypatch):
@@ -153,6 +163,40 @@ def test_auto_does_not_hide_other_errors(monkeypatch):
         dense_eig.eig(A, backend="auto", min_size=0)
 
 
+def test_solver_records_the_backend(monkeypatch):
+    monkeypatch.setattr(dense_eig, "_probe_cupy",
+                        lambda: (False, "CuPy is not installed"))
+    solver = _well_solver(16, backend="auto")
+    solver.solve_full()
+    assert solver.last_backend == "scipy"
+
+
+def test_shift_invert_falls_back_to_scipy_qz(monkeypatch):
+    """The QZ fallback of gevp_method='shift-invert' ignores the backend.
+
+    The Channel pencil of tests/test_channel_solver.py (B spans many decades
+    through h = exp(-z²/2)) fails the backward-error check of the
+    shift-invert solve from N = 34 up; N = 48 leaves a margin.
+    """
+    from psecas import ChebyshevRationalGrid
+
+    monkeypatch.setattr(dense_eig, "_probe_cupy",
+                        lambda: (False, "CuPy is not installed"))
+
+    class Channel(System):
+        def make_background(self):
+            self.h = np.exp(-self.grid.zg ** 2 / 2)
+
+    grid = ChebyshevRationalGrid(N=48, z='z')
+    system = Channel(grid, variables='G', eigenvalue='K2')
+    system.add_equation("-h*K2*G = dz(dz(G)) +z*dz(G)", boundary=True)
+    solver = Solver(grid, system, do_gen_evp=True,
+                    gevp_method='shift-invert', backend='cupy')
+    with pytest.warns(RuntimeWarning, match="falling back to QZ"):
+        E, _ = solver.solve_full()
+    assert solver.last_backend == "scipy"
+    E_ref = scipy.linalg.eig(solver.mat1.toarray(), solver.mat2.toarray())[0]
+    np.testing.assert_array_equal(E, E_ref)
 
 
 # -- zero-row deflation (CPU) ------------------------------------------------
@@ -236,3 +280,29 @@ def test_gpu_explicit_backend_raises_on_unsupported_pencil():
         _, _, used = dense_eig.eig(A, B, backend="auto", min_size=0,
                                    return_backend=True)
     assert used == "scipy"
+
+
+@gpu
+def test_gpu_solver_generalized_evp_matches_scipy():
+    """Infinite well, E_n = -n²π²/2: GPU and QZ give the same modes."""
+    results = {}
+    for backend in ("cupy", "scipy"):
+        solver = _well_solver(64, backend=backend)
+        solver.sorting_strategy = lambda E: (E, np.argsort(np.abs(E)))
+        sigmas = [solver.solve(mode=m)[0] for m in range(4)]
+        assert solver.last_backend == backend
+        results[backend] = np.array(sigmas)
+    exact = -(np.arange(1, 5) * np.pi) ** 2 / 2
+    np.testing.assert_allclose(results["cupy"].real, exact, rtol=1e-8)
+    np.testing.assert_allclose(results["cupy"], results["scipy"], rtol=1e-9)
+
+
+@gpu
+def test_gpu_auto_is_used_above_the_threshold():
+    solver = _well_solver(64, backend="auto")
+    solver.gpu_min_size = 0
+    solver.solve_full()
+    assert solver.last_backend == "cupy"
+    solver.gpu_min_size = 10 ** 6
+    solver.solve_full()
+    assert solver.last_backend == "scipy"
