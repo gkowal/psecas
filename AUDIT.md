@@ -15,9 +15,15 @@ The whole repository was reviewed: the `psecas` package (4 978 LOC), the test su
 verification — every finding marked **Confirmed** below was reproduced by running code against this
 tree. Numerical claims were checked against dense `scipy.linalg.eig` references.
 
-Test suite status on this environment: **54 passed, 1 failed** (`test_grids_generic.py::
+Test suite status at the time of the audit: **54 passed, 1 failed** (`test_grids_generic.py::
 test_grid_Dn_up_to_4th_order_against_analytic[LegendreExtremaGrid]`, rel. L2 error 6.203e-05 vs
 tolerance 6.000e-05).
+
+**Status as of 2026-09-24 on branch `fix/audit-findings`: 199 passed, 0 failed**, coverage 81 %
+(no files excluded). Every finding below carries a `> **Resolved**` note naming the commit that
+fixed it and what was re-verified. Re-verification was run functionally against the current tree
+rather than read off the fix commits — four findings first looked unresolved to a naive text scan,
+because the fixes carry comments quoting the code they replaced.
 
 ---
 
@@ -92,6 +98,8 @@ have raised `TypeError` on first use. One of the arguments they passed,
 
 ### C1 — Generalised shift-invert does not solve the eigenvalue problem
 
+> **Resolved** in `de26e68`. Re-verified 2026-09-24: shift-invert now uses an explicitly built `(A−σB)⁻¹B` in regular mode; a guess 2× off converges to rel. err 5.7e-12, and every result is residual-checked (`ShiftInvertError`), with the drivers falling back to a full solve.
+
 **Files:** [psecas/solver.py:195-218](psecas/solver.py#L195-L218) (`solve_mode`),
 [psecas/solver.py:735-749](psecas/solver.py#L735-L749) (`solve_with_guess`)
 
@@ -158,6 +166,8 @@ residual is the cheapest possible guard and would have caught this.
 
 ### C2 — `solve_with_guess` omits `M=mat2` in the generalised branch
 
+> **Resolved** in `d07d92c`. Re-verified 2026-09-24: the generalised branch delegates to `solve_mode`; channel-system error 1.17e-03 → 3.4e-14.
+
 **File:** [psecas/solver.py:737-742](psecas/solver.py#L737-L742)
 
 ```python
@@ -189,6 +199,8 @@ close to the identity.
 cure.
 
 ### C3 — Variables reachable only through a substitution are silently dropped
+
+> **Resolved** in `802a6ea`. Re-verified 2026-09-24: substitutions expand once before the per-variable early-out; the substituted form now reproduces −π² exactly.
 
 **File:** [psecas/solver.py:1023-1026](psecas/solver.py#L1023-L1026)
 
@@ -228,6 +240,8 @@ text in the early-out. This is also faster — substitutions currently re-expand
 
 ### H1 — `var_replace` treats digits and underscores as word boundaries
 
+> **Resolved** in `e47d221`. Re-verified 2026-09-24: matching is now a compiled regex with `[A-Za-z0-9_]` lookaround; `beta2`, `v_x`, `rho1` all correct and a self-referential replacement terminates.
+
 **File:** [psecas/string_methods.py:20-26](psecas/string_methods.py#L20-L26)
 
 The guard checks only `str.isalpha()` on the neighbouring characters, so a name is considered
@@ -253,6 +267,8 @@ escape only because `"grid.zg"` happens to embed its `z` and `r` next to alphabe
 not design.
 
 ### H2 — `plot_solution` is broken on current Matplotlib
+
+> **Resolved** in `7a63e7e`. Re-verified 2026-09-24: `clear=True` + `squeeze=False`; `dim=1` and repeated figure numbers both work, and `plotting.py` is no longer excluded from coverage.
 
 **File:** [psecas/plotting.py:10-12](psecas/plotting.py#L10-L12)
 
@@ -281,6 +297,8 @@ A second, independent bug lurks behind it: when `system.dim == 1`, `plt.subplots
 
 ### H3 — `add_equation` silently discards equations
 
+> **Resolved** in `ec6396b`. Re-verified 2026-09-24: raises `ValueError` naming the variables and the equation; LHS matching uses whole identifiers.
+
 **File:** [psecas/system.py:37-51](psecas/system.py#L37-L51)
 
 If no variable name is found in `eq.split('=')[0]`, the method falls through the loop and returns
@@ -303,6 +321,8 @@ The matching detection is also substring-based, so an LHS like `sigma*dvx` match
 word-boundary matching for the LHS scan.
 
 ### H4 — Grid pickle round-trip is irreversible
+
+> **Resolved** in `204ec1f`. Re-verified 2026-09-24: `__setstate__` rebuilds via `make_grid()` with observers muted; all 9 grids round-trip with a working `D(1)`.
 
 **File:** [psecas/grids/grid.py:21-60](psecas/grids/grid.py#L21-L60)
 
@@ -327,6 +347,8 @@ This breaks `load_system` and the MPI `IO.save_system` workflow: any post-proces
 `_build_d1`/`build_derivatives` path (or implement it properly per subclass).
 
 ### H5 — `prolongate_eigenvector` corrupts endpoint values
+
+> **Resolved** in `649cef0`. Re-verified 2026-09-24: every new node is interpolated and query points are clipped; Fourier 32→64 endpoint error 4.9e-02 → 6.7e-16.
 
 **File:** [psecas/solver.py:369-371](psecas/solver.py#L369-L371)
 
@@ -359,6 +381,8 @@ outermost rational-Chebyshev node is far outside the rest (`zg[0] = -63.66`, `zg
 explicitly only when the packing is actually trimmed; clamp or extrapolate for infinite grids.
 
 ### H6 — Boundary conditions on `FourierGrid` / `HermiteGrid` produce wrong matrices without error
+
+> **Resolved** in `a35c76d`. Re-verified 2026-09-24: all indices derive from `grid.NN`; Hermite `mat1` is now (NN−2)², and boundary conditions on a periodic grid are refused.
 
 **Files:** [psecas/solver.py:891-900](psecas/solver.py#L891-L900),
 [psecas/solver.py:1124-1132](psecas/solver.py#L1124-L1132),
@@ -397,12 +421,16 @@ Related: `_errors` computes `fac = 1 + |Im σ| / max(atol, Re σ)`
 ([solver.py:519](psecas/solver.py#L519)) which is meaningless for negative `Re σ`, so relaxing M1
 requires fixing that too.
 
+> **Resolved** in `de26e68`. Re-verified 2026-09-24: `require_re_positive` is a parameter of `iterate_solve_multimode`; damped modes are reachable.
+
 **M2 — `iterate_solve_multimode(Ns)` crashes for a single resolution.**
 `UnboundLocalError: cannot access local variable 'errors'` at
 [solver.py:632-633](psecas/solver.py#L632-L633) — `errors` is only bound inside the `for N in Ns[1:]`
 loop. Confirmed. `iterate_solver` has the mirror-image problem: it indexes `Ns[1]` unconditionally
 ([solver.py:793](psecas/solver.py#L793)) and raises `IndexError` for `len(Ns) < 2`. Neither
 requirement is documented.
+
+> **Resolved** in `208a488`. Re-verified 2026-09-24: `Ns` of length 1 works and reports `error = inf`; `iterate_solver` rejects fewer than two with a clear message.
 
 **M3 — Boundary-expression validation rejects legal input and uses `assert`.**
 [solver.py:1134-1135](psecas/solver.py#L1134-L1135):
@@ -416,12 +444,16 @@ assert int(bound.split("=")[1]) == 0, 'rhs of boundary expressions must be zero'
 Confirmed. Both assertions here are also stripped under `python -O`, turning a validation failure into
 silent miscomputation. Use `float(...)` and raise `ValueError`.
 
+> **Resolved** in `8dfde4a`. Re-verified 2026-09-24: parsed with `float()` and raised as `ValueError`; `0`, `0.0`, `0.` and whitespace all accepted.
+
 **M4 — `LegendreExtremaGrid` produces a complex-valued grid.**
 `legroots` returns `complex128`, so `self.zg` and every differentiation matrix are complex
 ([legendre_extrema.py:36](psecas/grids/legendre_extrema.py#L36)). The imaginary parts are exactly
 zero, but the cost is doubled memory and arithmetic throughout the solver, plus `ComplexWarning`s in
 downstream code. `np.errstate(divide='ignore')` at line 40 also fails to suppress the accompanying
 `RuntimeWarning: invalid value encountered in divide`. Wrap with `np.real(...)` and add `invalid='ignore'`.
+
+> **Resolved** in `5d0190a`. Re-verified 2026-09-24: `zg` and the matrices are `float64`; the fit is mapped to [-1, 1] so accuracy no longer depends on the domain.
 
 **M5 — The one failing test is a real accuracy signal.**
 `LegendreExtremaGrid: D(4) rel L2 err = 6.203e-05, tol = 6.000e-05`. Orders above 2 are built by
@@ -431,9 +463,13 @@ spectral matrices. `ChebyshevTLnGrid` already carries a `TODO` acknowledging the
 Either compute `D(n)` from explicit formulas or document the accuracy ceiling and loosen the test —
 but do not simply bump the tolerance without recording why.
 
+> **Resolved** in `b7a613e`. Re-verified 2026-09-24: Welfert barycentric recursion for polynomial grids and native dmsuite orders for Hermite/Laguerre; `D(4)` rel. err 6.2e-05 → 6.1e-09, and the test tolerances were tightened rather than raised.
+
 **M6 — `get_2Dmap` ignores its `xmin` argument.**
 [plotting.py:59-60](psecas/plotting.py#L59-L60): `xg = (0.5 + np.arange(Nx)) * dx`, missing the
 `+ xmin` that the adjacent `zg` line has. Confirmed: maps for `xmin=0` and `xmin=100` are bit-identical.
+
+> **Resolved** in `7a567c4`. Re-verified 2026-09-24: `+ xmin` restored; shifted windows now give different maps.
 
 **M7 — `get_2D_cylindrical_map` mis-shapes its output.**
 [plotting.py:183](psecas/plotting.py#L183): `np.resize(y, (Nx, Ny))` while `meshgrid` produced
@@ -441,10 +477,14 @@ but do not simply bump the tolerance without recording why.
 `get_2D_cylindrical_map_in_cylindrical_coords` similarly ignores `phimin`
 ([plotting.py:106](psecas/plotting.py#L106)) and is not exported from `psecas/__init__.py`.
 
+> **Resolved** in `7a567c4`. Re-verified 2026-09-24: `y.reshape(rr.shape)`; verified with Nx=16, Ny=24. `phimin` and a default `rmax` fixed, and the cylindrical helper is exported.
+
 **M8 — Unused and misleading parameters.**
 `Solver.solve(useOPinv=True, …)` documents the parameter and never uses it
 ([solver.py:636](psecas/solver.py#L636)); `solve_mode(verbose=…)` likewise. `solve` always does a full
 dense `eig`, so a caller passing `useOPinv` believes they selected a sparse path they did not get.
+
+> **Resolved** in `3f5f764`. Re-verified 2026-09-24: `useOPinv` still accepted but raises `DeprecationWarning`; `saveall` documented.
 
 **M9 — `sorting_strategy` mutates its argument and hard-codes thresholds.**
 [solver.py:834-835](psecas/solver.py#L834-L835) sets `E[np.abs(E.real) > 10.0] = 0` **in place** on the
@@ -453,11 +493,15 @@ O(10⁻⁴) (tearing) or O(10²) (channel). It is documented as overridable — 
 exactly that — but the default silently zeroes legitimate eigenvalues. Copy the input and make the
 cutoff a parameter.
 
+> **Resolved** in `c14ce58`. Re-verified 2026-09-24: sorts a copy; the threshold is the configurable `sorting_cutoff` attribute.
+
 **M10 — `keep_result` can collide with its own metadata keys.**
 [solver.py:865-867](psecas/solver.py#L865-L867) writes `mode`, and the iterative drivers add
 `converged`, `error`, `grid`, `r_err`, `a_err` into the same dict that holds the eigenmode profiles
 keyed by variable name. A system with a variable called `grid` or `mode` loses data silently. Use a
 nested `result['fields'][var]` or prefix the metadata.
+
+> **Resolved** in `deb9801`. Re-verified 2026-09-24: `RESERVED_NAMES` checked in `Solver.__init__`, so the `grid` case fails before the parser reaches it.
 
 **M11 — `mpi_io.IO` shells out for filesystem operations.**
 [mpi_io.py:30-37](psecas/mpi_io.py#L30-L37):
@@ -474,6 +518,8 @@ discarded. The `cp` destination concatenates `data_folder + experiment`, which b
 The bare `except: pass` at [mpi_io.py:45](psecas/mpi_io.py#L45) swallows `KeyboardInterrupt` too.
 `log()` divides by `self.steps_local`, which is zero when there are more ranks than steps.
 
+> **Resolved** in `90a2c91`. Re-verified 2026-09-24: `os.makedirs`/`shutil.copy`/`socket.gethostname`; 0 `shell=True` calls and 0 bare excepts remain, and paths with spaces plus reruns over an existing directory are verified.
+
 **M12 — `eval` runs in an environment described as restricted but is not.**
 [solver.py:1064](psecas/solver.py#L1064) and [solver.py:1166](psecas/solver.py#L1166) pass
 `{"__builtins__": {"__import__": builtins.__import__}}` under the comment *"Evaluate the expression in
@@ -483,6 +529,8 @@ an exploit path in ordinary use, but it becomes one in combination with `serial_
 `pickle.load`s arbitrary files ([serial_io.py:8](psecas/serial_io.py#L8)) — unpickling untrusted data
 is arbitrary code execution regardless. Either drop the misleading comment or remove `__import__` and
 inject the handful of names (`np`, etc.) the equations actually need.
+
+> **Resolved** in `86ad5ac`. Re-verified 2026-09-24: the false claim is gone and the namespace now carries numpy, so `sqrt()` works in an equation. A curated-builtins attempt was tried first and abandoned: it broke `test_bessel_solutions` with `KeyError: '__import__'`, because the warning machinery imports through the evaluating frame.
 
 ---
 
@@ -494,26 +542,36 @@ running from the repository root. The workaround is visible in the tree: `tests/
 **symlink to `psecas/`**, present solely to make imports resolve. A minimal `pyproject.toml` removes
 that hack and lets CI test an installed package.
 
+> **Resolved** in `7b205ee`. Re-verified 2026-09-24: `pyproject.toml` added; the `tests/psecas` symlink and `pytest.ini` are gone.
+
 **L2 — Unpinned dependency on a personal Git fork.** `requirements.txt` ends with
 `git+https://github.com/tberlok/dmsuite.git` — no tag, no commit hash. `HermiteGrid` and `LaguerreGrid`
 break if that fork moves or disappears. Pin a commit, or vendor the ~100 lines of `herdif`/`lagdif`
 actually used.
+
+> **Resolved** in `7b205ee`. Re-verified 2026-09-24: pinned to commit `0c02f23`, and moved to an optional extra so seven of nine grids install without it.
 
 **L3 — CI targets an unsupported Python and a retired image.** `.circleci/config.yml` uses
 `circleci/python:3.6.1`; Python 3.6 reached end of life in 2021 and the `circleci/*` image namespace is
 deprecated. The code is developed on 3.14 (f-strings, walrus-free but `Δ`/`σ` identifiers, `@` matmul).
 CI is therefore testing a configuration nobody uses, and the badge in the README may be stale.
 
+> **Resolved** in `0417efb`. Re-verified 2026-09-24: `cimg/python` on a 3.9 + 3.12 matrix, installing the package rather than setting `PYTHONPATH`.
+
 **L4 — 17 test functions `return` instead of `assert`.** Every grid test file ends with
 `return ...`, raising `PytestReturnNotNoneWarning` on pytest 7+ and scheduled to become an **error**
 in pytest 8. Worst offenders: `test_grids_generic.py` (8), `test_sinc.py` (6),
 `test_rational_chebyshev.py` (6), `test_hermite.py` (6).
+
+> **Resolved** in `18b0959`. Re-verified 2026-09-24: 0 test functions return a value; warning count 29 → 8.
 
 **L5 — One test is tautological.** `test_higher_order_derivatives.py::
 test_higher_order_composition_consistency` asserts `D(k) ≈ D(1) @ D(k-1)` to `1e-12` — which is the
 literal implementation of `ensure_derivatives`. It cannot fail and validates nothing about accuracy.
 `test_grid_Dn_up_to_4th_order_against_analytic` is the test that does real work (and is the one
 failing, per M5).
+
+> **Resolved** in `cdb6d8e`. Re-verified 2026-09-24: replaced by checks against analytic derivatives, plus one asserting the recursion beats composition.
 
 **L6 — Substantial duplication.**
 - `psecas/systems/tearing_instability-dpi.py` is a 657-line near-copy of `tearing_instability.py`;
@@ -527,13 +585,19 @@ failing, per M5).
 - `examples/tearing-instability/` holds five near-variants of the same driver
   (`eigenmodes-compute.py`, `-orig.py`, `-optimized.py`, `-maxima*.py`), ~5 000 lines total.
 
+> **Resolved** in `ebf8b6b` and `488e04e`. Re-verified 2026-09-24: `InfiniteGrid` shared by the five infinite grids (−228/+88 lines) and the `-dpi` module folded in behind `normalized=` (matrices bit-identical). **The examples bullet is deliberately not done** — see the note in §2.
+
 **L7 — Inconsistent indentation.** Both `tearing_instability*.py` files are **tab-indented** (556/557
 tab-led lines); the rest of the package uses 4 spaces. Mixed styles in one package are a merge-conflict
 generator.
 
+> **Resolved** in `311ef6d`. Re-verified 2026-09-24: converted with the AST verified unchanged; 0 tab-indented lines remain.
+
 **L8 — Imports inside function bodies throughout.** Nearly every method begins with
 `import numpy as np`. It is harmless at runtime (module cache) but defeats static analysis, hides the
 dependency surface, and makes the 1 181-line `solver.py` harder to read. Move to module scope.
+
+> **Resolved** in `7e3db33`. Re-verified 2026-09-24: 134 → 21 function-level imports; the 21 that remain are deliberate deferrals of optional dependencies and now say so.
 
 **L9 — Documentation gaps.** 148 of 216 public classes/functions (**69 %**) have no docstring.
 `Solver` itself is documented as `"""docstring for Solver"""`
@@ -542,12 +606,16 @@ copyright line still reads 2020. The README does not mention `iterate_solve_mult
 `solve_mode`, `filter_modes` or the `max_derivative_order` / `dz(var, n)` features — none of the work
 on this branch is user-visible in the docs.
 
+> **Resolved** in `e287299`. Re-verified 2026-09-24: docstring coverage 31% → 63%; README gained the solver-method table, the residual-check note and an equation-writing section.
+
 **L10 — Working tree hygiene.** Uncommitted at the time of audit: two patch files
 (`fixes.patch`, `eigenmode_visualization.patch`) whose content is either already applied
 (`fixes.patch` matches [solver.py:591-598](psecas/solver.py#L591-L598) verbatim) or never applied
 (`plot_eigenmodes`); a `tests/psecas` symlink; an `.agents/` directory; and the two tearing system
 modules, which examples already import. The `.gitignore` entry `*.txt` (no trailing newline) will
 silently exclude any future text file added to the repo.
+
+> **Resolved** in `cbf36ce`. Re-verified 2026-09-24: both patch files gone (one already applied, one applied as a proper `plot_eigenvalues` feature); `.gitignore` rewritten without the unterminated `*.txt`.
 
 ---
 
@@ -576,37 +644,61 @@ Worth recording, since an audit naturally skews negative:
 
 ---
 
-## 8. Recommended order of work
+## 8. Work plan — completed
+
+The list below is the order the work was originally recommended in. All of it is done, on branch
+`fix/audit-findings`, one commit per finding; §2 has the finding-to-commit table.
 
 **Before any further physics results are produced from this branch:**
 
-1. **C1** — add a residual check to every shift-invert solve and fall back to `solve_full` when it
-   fails. `refine_eigenvector` already computes the residual; return it and act on it. Until this is
-   done, treat any eigenvalue from `iterate_solve_multimode`'s `[with guess]` path as unverified.
-2. **C2** — one-line fix (`M=self.mat2`), then re-run `test_channel_solver` and `test_khi_solver`.
-3. **C3** — move substitution expansion ahead of the per-variable early-out.
-4. Add a regression test that compares each iterative driver against a dense `solve_full` reference on
-   a generalised problem with a non-identity `mat2`. The current suite cannot catch C1 or C2 because
-   every system it exercises has `mat2 ≈ I`.
+1. ✅ **C1** — residual check on every shift-invert solve, falling back to `solve_full` on failure.
+   `refine_eigenvector` already computed that residual and discarded it; it is now returned and acted
+   on. *An eigenvalue produced by `iterate_solve_multimode`'s `[with guess]` path **before** this
+   branch should still be treated as unverified — the fix does not retroactively flag old results.*
+2. ✅ **C2** — the generalised branch delegates to `solve_mode`. Adding `M=self.mat2` alone would not
+   have sufficed, since `eigs` also requires `M` positive definite.
+3. ✅ **C3** — substitution expansion moved ahead of the per-variable early-out.
+4. ✅ Regression tests added (`tests/test_shift_invert.py`), comparing the drivers against a dense
+   `solve_full` reference on problems whose `mat2` is singular, indefinite and non-symmetric. Each
+   new assertion was checked to fail against the pre-fix code.
 
 **Next:**
 
-5. **H1** (regex word boundaries), **H3** (raise on unmatched equation), **H2** (`clear=True` +
-   `squeeze=False`) — each is a small, self-contained fix with clear blast radius.
-6. **H4**, **H5**, **H6** — the `NN` vs `N + 1` convention should be settled once and applied
-   everywhere; H6 and part of H5 both stem from it.
-7. **M2**, **M3**, **M6**, **M7** — small correctness fixes with obvious tests.
+5. ✅ **H1**, **H2**, **H3**.
+6. ✅ **H4**, **H5**, **H6** — the `NN` versus `N + 1` convention is settled: every index in the
+   solver now derives from `grid.NN`.
+7. ✅ **M2**, **M3**, **M6**, **M7**.
 
 **Then, as housekeeping:**
 
-8. Add `pyproject.toml`, delete the `tests/psecas` symlink, pin `dmsuite`, modernise CI to Python
-   3.11+ (L1–L3).
-9. Convert `return` to `assert` in the test suite before pytest 8 makes it an error (L4).
-10. Merge `tearing_instability-dpi.py` into `tearing_instability.py`; extract an `InfiniteGrid` base
-    class (L6).
-11. Plumb `require_re_positive` through `iterate_solve_multimode` so stable modes are reachable (M1).
+8. ✅ `pyproject.toml` added, symlink deleted, `dmsuite` pinned, CI moved to `cimg/python` on a
+   3.9 + 3.12 matrix (L1–L3).
+9. ✅ `return` removed from 21 test functions (L4).
+10. ✅ `tearing_instability-dpi.py` folded in behind `normalized=`; `InfiniteGrid` extracted (L6).
+11. ✅ `require_re_positive` plumbed through `iterate_solve_multimode` (M1).
+
+### Found during the fixes, not in the original audit
+
+- **The tearing driver scripts called an API that does not exist** — `iterate_solver` with
+  `iterate_solve_multimode`'s arguments, `real_range` for `re_range`, `guess_tol` for `gtol`, and
+  `re_range` passed to the `Solver` constructor. All four scripts would have raised `TypeError` on
+  first use. Fixed in `2fd398b`, which also implements `allgrids`, an argument they passed that
+  existed in no method at all.
+
+### Still open
+
+- **L6, third bullet** — the five near-variant driver scripts under `examples/tearing-instability/`
+  (~5 000 lines). Left deliberately: consolidating them means rewriting the scripts that reproduce
+  published figures, and choosing the canonical variant is a judgement about the research, not the
+  code.
+- **Docstring coverage is 63 %**, up from 31 %. What remains is mostly internal helpers in the
+  tearing systems.
+- **`tearing_instability.py` sits at 58 % test coverage.** The `kx != 0, ky != 0` branches raise
+  `NotImplementedError`, and several parameter combinations (Hall, guide field, shear) are
+  untested. Worth covering before those paths are relied on for results.
 
 ---
 
-*Findings marked "Confirmed" were reproduced against this working tree. Reproduction snippets are
-embedded inline above and can be run from the repository root.*
+*Every finding was reproduced against the tree as audited, and every resolution re-verified against
+the tree as it now stands. Reproduction snippets are embedded inline above and can be run from the
+repository root.*
