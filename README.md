@@ -91,10 +91,20 @@ $ pip install -e '.[dmsuite,mpi]'
 # Testing
 
 Before using the code, the tests should be run to make sure that they are
-working. From the top-level directory
+working. From the top-level directory, using the same interpreter you
+installed Psecas into:
 ```
 $ pip install -e '.[test]'
 $ pytest
+```
+
+If Psecas lives in a dedicated virtual environment, call the interpreter by
+its full path so there is no doubt which one is running — a bare `pytest`
+picks up whatever happens to be first on `PATH`, which is rarely what you
+want when comparing numerical results across environments:
+```
+$ ~/.venv/bin/python -m pip install -e '.[test]'
+$ ~/.venv/bin/python -m pytest
 ```
 
 ### Overview of the code
