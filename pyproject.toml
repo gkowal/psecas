@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "psecas"
+version = "1.0.0"
+description = "Pseudo-Spectral Eigenvalue Calculator with an Automated Solver"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+authors = [
+    { name = "Thomas Berlok" },
+]
+keywords = [
+    "eigenvalue problems",
+    "pseudo-spectral methods",
+    "linear stability analysis",
+    "astrophysical fluid dynamics",
+    "magnetohydrodynamics",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "sympy",
+]
+
+[project.optional-dependencies]
+# HermiteGrid and LaguerreGrid need dmsuite; everything else works without it.
+# Pinned to an exact commit: this is an unreleased personal fork, so an
+# unpinned reference would let those two grids change or break underneath a
+# reproducible calculation. Verified against tberlok/dmsuite master as of
+# 2026-09-22; tags v0.1.0 and v0.1.1 also exist if a looser pin is wanted.
+dmsuite = [
+    "dmsuite @ git+https://github.com/tberlok/dmsuite.git@0c02f23bf4f08ea82d54da1abb542b56908970d0",
+]
+mpi = ["mpi4py"]
+test = ["pytest", "pytest-cov"]
+
+[project.urls]
+Homepage = "https://github.com/tberlok/psecas"
+Repository = "https://github.com/tberlok/psecas"
+Paper = "https://arxiv.org/abs/1902.01403"
+
+[tool.setuptools.packages.find]
+include = ["psecas*"]
+
+[tool.pytest.ini_options]
+# Make the in-tree package importable without installing it. This replaces
+# the tests/psecas symlink, which pointed at the package directory purely so
+# that `from psecas import ...` would resolve when pytest put tests/ on
+# sys.path.
+pythonpath = ["."]
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore:the matrix subclass is not the recommended way*:PendingDeprecationWarning",
+]

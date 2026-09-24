@@ -1,3 +1,4 @@
+from .grid import Grid, InfiniteGrid
 from .fourier import FourierGrid
 from .chebyshev_extrema import ChebyshevExtremaGrid
 from .chebyshev_roots import ChebyshevRootsGrid

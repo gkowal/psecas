@@ -1,4 +1,8 @@
 from psecas.grids.grid import Grid
+from numpy.polynomial.legendre import legder, legroots, legval
+from numpy.polynomial.legendre import legfit
+from numpy.polynomial.legendre import legval
+import numpy as np
 
 
 class LegendreExtremaGrid(Grid):
@@ -17,12 +21,16 @@ class LegendreExtremaGrid(Grid):
 
     """
 
+    # Lagrange interpolation through distinct nodes: high-order
+    # derivatives come from the barycentric recursion, not composition.
+    polynomial = True
+
     def __init__(self, N, zmin, zmax, z="z", max_derivative_order=2):
         super().__init__(N, zmin, zmax, z=z, max_derivative_order=max_derivative_order)
 
     def make_grid(self):
-        import numpy as np
-        from numpy.polynomial.legendre import legder, legroots, legval
+        """Build the nodes zg and the differentiation matrices, then notify
+        any objects bound to this grid."""
 
         N = self._N
         self.NN = N + 1
@@ -33,11 +41,19 @@ class LegendreExtremaGrid(Grid):
         d1 = np.zeros((N + 1, N + 1))
 
         cp = legder([0] * N + [1])
-        zg = np.hstack([-1.0, legroots(cp), 1.0])
+        # legroots returns a complex array even when, as here, every root is
+        # real. Left as-is it made zg - and hence every differentiation
+        # matrix, every background array evaluated on zg, and every matrix
+        # the solver assembles - complex128, doubling memory and arithmetic
+        # throughout and raising ComplexWarning downstream.
+        zg = np.hstack([-1.0, np.real(legroots(cp)), 1.0])
 
         P_N = legval(zg, [0] * N + [1])
 
-        with np.errstate(divide='ignore'):
+        # The diagonal is 0/0; it is overwritten immediately below. Suppress
+        # 'invalid' as well as 'divide', since 0/0 raises the former and the
+        # warning was still being printed.
+        with np.errstate(divide='ignore', invalid='ignore'):
             d1 = P_N[:, None] / (P_N[None, :] * (zg[:, None] - zg[None, :]))
 
         d1[np.diag_indices(N+1)] = 0.0
@@ -55,16 +71,25 @@ class LegendreExtremaGrid(Grid):
         for callback in self._observers:
             callback()
 
-    def to_coefficients(self, f):
-        from numpy.polynomial.legendre import legfit
+    def _to_standard(self, z):
+        """Map z from [zmin, zmax] onto the standard interval [-1, 1]."""
+        return (z - self.zmin) / self.L * 2.0 - 1.0
 
-        c, res = legfit(self.zg, f, deg=self.N, full=True)
+    def to_coefficients(self, f):
+        """Coefficients of f in the standard Legendre basis on [-1, 1]."""
+
+        # Fit on the mapped grid, matching what the Chebyshev grids do.
+        # Fitting on the physical grid instead made the accuracy depend on
+        # where the domain happens to sit: for a Gaussian on [0, 10] the
+        # interpolation error was 1.3e-03 against 1.1e-05 for the same
+        # function on [-1, 1], because the Legendre basis is only well
+        # conditioned on its own interval.
+        c, res = legfit(self._to_standard(self.zg), f, deg=self.N, full=True)
 
         return c
 
     def interpolate(self, z, f):
-        from numpy.polynomial.legendre import legval
-        import numpy as np
+        """Evaluate the function sampled as f on self.zg at the points z."""
 
         msg = "Can't interpolate outside grid domain"
         assert np.array([z]).min() >= self.zmin, msg
@@ -73,4 +98,4 @@ class LegendreExtremaGrid(Grid):
         # Get coefficients for Legendre polynomials
         c = self.to_coefficients(f)
 
-        return legval(z, c)
+        return legval(self._to_standard(z), c)

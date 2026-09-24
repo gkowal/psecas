@@ -1,7 +1,8 @@
-from psecas.grids.grid import Grid
+from psecas.grids.grid import Grid, InfiniteGrid
+import numpy as np
 
 
-class ChebyshevRationalGrid(Grid):
+class ChebyshevRationalGrid(InfiniteGrid, Grid):
     """
         This grid uses Rational Chebyshev functions on z ∈ [-∞, ∞],
         the TBn(z) functions, to dicretize the system (Boyd page 356 and
@@ -18,49 +19,7 @@ class ChebyshevRationalGrid(Grid):
         maximum values of the grid depend on both N and C.
     """
 
-    def __init__(self, N, C=1, z="z", max_derivative_order=2):
-        self._observers = []
-
-        self._N = N
-        self._C = C
-        self._max_derivative_order = int(max_derivative_order)
-        self._d = []
-        self.make_grid()
-
-        # Grid variable name
-        self.z = z
-
-    def bind_to(self, callback):
-        self._observers.append(callback)
-
-    @property
-    def N(self):
-        return self._N
-
-    @N.setter
-    def N(self, value):
-        self._N = value
-        self.make_grid()
-
-    @property
-    def zmin(self):
-        return self.zg.min()
-
-    @property
-    def zmax(self):
-        return self.zg.max()
-
-    @property
-    def C(self):
-        return self._C
-
-    @C.setter
-    def C(self, value):
-        self._C = value
-        self.make_grid()
-
     def cheb_gauss_nodes_and_Dx(self, N):
-        import numpy as np
 
         j = np.arange(1, N+1)
         φ = (2*j - 1 - N) * np.pi / (2*N)   # Gauss angles (symmetric)
@@ -83,7 +42,8 @@ class ChebyshevRationalGrid(Grid):
         return s, x, λ, Dx
 
     def make_grid(self):
-        import numpy as np
+        """Build the nodes zg and the differentiation matrices, then notify
+        any objects bound to this grid."""
 
         C = self.C
         self.NN = self.N + 1
@@ -137,7 +97,6 @@ class ChebyshevRationalGrid(Grid):
         p : float or ndarray
             Interpolated values at z.
         """
-        import numpy as np
 
         z = np.asarray(z, dtype=float)
         f = np.asarray(f)

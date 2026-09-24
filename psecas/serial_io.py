@@ -1,12 +1,17 @@
+import numpy as np
+import pickle
+
 def load_system(filename):
     """Load object containing solution.
     Input: filename, eg 'system.p'
     Output: system object
-    """
-    import pickle
 
-    system = pickle.load(open(filename, 'rb'))
-    return system
+    Note that this unpickles the file, which executes code contained in it.
+    Only load files you produced yourself or otherwise trust.
+    """
+
+    with open(filename, 'rb') as fh:
+        return pickle.load(fh)
 
 
 def save_system(system, filename):
@@ -17,16 +22,15 @@ def save_system(system, filename):
     save_system(system, 'system.p')
 
     """
-    import pickle
 
-    pickle.dump(system, open(filename, 'wb'))
+    with open(filename, 'wb') as fh:
+        pickle.dump(system, fh)
 
 
 def write_athena(system, Nz, Lz, path=None, name=None):
     """
     Interpolate theory onto grid in Athena
     """
-    import numpy as np
 
     # Grid points where Athena is defined (improve this!)
     dz = Lz / Nz

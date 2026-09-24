@@ -1,7 +1,9 @@
-from psecas.grids.grid import Grid
+from psecas.grids.grid import Grid, InfiniteGrid
+from scipy.interpolate import barycentric_interpolate
+import numpy as np
 
 
-class HermiteGrid(Grid):
+class HermiteGrid(InfiniteGrid, Grid):
     """
         This grid uses Hermite polynomials on z ∈ [-∞, ∞] to dicretize the
         system. dmsuite is used for the setup of the grid.
@@ -17,65 +19,29 @@ class HermiteGrid(Grid):
         maximum values of the grid depend on both N and C.
     """
 
-    def __init__(self, N, C=1, z="z", max_derivative_order=2):
-        self._observers = []
-
-        self.maxN = 245
-        msg = "It appears that dmsuite cannot handle N larger than {}"
-        assert N <= self.maxN, msg.format(self.maxN)
-
-        self._N = N
-        self._C = C
-        self._max_derivative_order = int(max_derivative_order)
-        self._d = []
-        self.make_grid()
-
-        # Grid variable name
-        self.z = z
-
-    def bind_to(self, callback):
-        self._observers.append(callback)
-
-    @property
-    def N(self):
-        return self._N
-
-    @N.setter
-    def N(self, value):
-        msg = "N = {} requested. Maximum allowed is {}"
-        assert value <= self.maxN, msg.format(value, self.maxN)
-        self._N = value
-        self.make_grid()
-
-    @property
-    def zmin(self):
-        return self.zg.min()
-
-    @property
-    def zmax(self):
-        return self.zg.max()
-
-    @property
-    def C(self):
-        return self._C
-
-    @C.setter
-    def C(self, value):
-        self._C = value
-        self.make_grid()
+    # dmsuite cannot build this grid beyond here.
+    maxN = 245
 
     def make_grid(self):
-        import numpy as np
+        """Build the nodes zg and the differentiation matrices, then notify
+        any objects bound to this grid."""
 
         # from numpy.polynomial import Hermite as H
         self.NN = self.N
 
+        # Imported here, not at module level: dmsuite is an optional
+        # dependency (pyproject.toml extra 'dmsuite') that only this grid
+        # and LaguerreGrid need, so `import psecas` must not require it.
         from dmsuite import herdif
 
-        zg, D = herdif(self.NN, 2, 1 / self.C)
+        # Ask dmsuite for every order we need. It builds each one directly
+        # rather than by repeated multiplication, which is more accurate at
+        # high order than the composition fallback in Grid.
+        order = max(2, self._max_derivative_order)
+        zg, D = herdif(self.NN, order, 1 / self.C)
 
         self.zg = zg
-        self._d = [ np.eye(self.NN), D[0], D[1] ]
+        self._d = [np.eye(self.NN)] + [D[i] for i in range(order)]
 
         self.finalize_derivatives()
 
@@ -88,8 +54,6 @@ class HermiteGrid(Grid):
         # from numpy.polynomial.hermite import hermfit, hermval
         # c, res = hermfit(self.zg, f, deg=self.N, full=True)
         # return hermval(z, c)
-        from scipy.interpolate import barycentric_interpolate
-        import numpy as np
 
         msg = "Can't interpolate outside grid domain"
         assert np.array([z]).min() >= self.zmin, msg

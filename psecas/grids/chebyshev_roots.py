@@ -1,4 +1,7 @@
 from psecas.grids.grid import Grid
+from numpy.polynomial.chebyshev import chebfit
+from numpy.polynomial.chebyshev import chebval
+import numpy as np
 
 
 class ChebyshevRootsGrid(Grid):
@@ -17,11 +20,16 @@ class ChebyshevRootsGrid(Grid):
 
     """
 
+    # Lagrange interpolation through distinct nodes: high-order
+    # derivatives come from the barycentric recursion, not composition.
+    polynomial = True
+
     def __init__(self, N, zmin, zmax, z="z", max_derivative_order=2):
         super().__init__(N, zmin, zmax, z=z, max_derivative_order=max_derivative_order)
 
     def make_grid(self):
-        import numpy as np
+        """Build the nodes zg and the differentiation matrices, then notify
+        any objects bound to this grid."""
 
         N = self._N
         self.NN = N + 1
@@ -53,8 +61,7 @@ class ChebyshevRootsGrid(Grid):
             callback()
 
     def to_coefficients(self, f):
-        from numpy.polynomial.chebyshev import chebfit
-        import numpy as np
+        """Expand the values f, sampled on self.zg, in the spectral basis."""
 
         # Convert grid to standard xg = [-1, 1]
         xg = (self.zg - self.zmin)/self.L * 2. - 1.
@@ -65,8 +72,7 @@ class ChebyshevRootsGrid(Grid):
         return c
 
     def interpolate(self, z, f):
-        from numpy.polynomial.chebyshev import chebval
-        import numpy as np
+        """Evaluate the function sampled as f on self.zg at the points z."""
 
         msg = "Can't interpolate outside grid domain"
         assert np.array([z]).min() >= self.zmin, msg

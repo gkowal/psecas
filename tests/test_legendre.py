@@ -1,3 +1,4 @@
+import pytest
 def test_legendre_differentation(show=False):
     """Test the differentation routine of LegendreExtremaGrid"""
     from psecas import LegendreExtremaGrid
@@ -26,8 +27,6 @@ def test_legendre_differentation(show=False):
         plt.show()
 
     np.testing.assert_allclose(yp_num, yp_exac, atol=1e-16)
-
-    return (yp_num, yp_exac)
 
 
 def test_legendre_interpolation(show=False):
@@ -64,9 +63,57 @@ def test_legendre_interpolation(show=False):
         plt.show()
 
     np.testing.assert_allclose(y_fine, y_interpolated, atol=1e-12)
-    return (y_fine, y_interpolated)
 
 
 if __name__ == "__main__":
-    (yp_num, yp_exac) = test_legendre_differentation(show=True)
-    (y_fine, y_interpolated) = test_legendre_interpolation(show=True)
+    test_legendre_differentation(show=True)
+    test_legendre_interpolation(show=True)
+
+
+def test_legendre_grid_is_real():
+    """
+    legroots returns complex128 even when every root is real. Left as-is it
+    made zg, every differentiation matrix, every background array evaluated
+    on zg and every assembled solver matrix complex.
+    """
+    import numpy as np
+    from psecas import LegendreExtremaGrid
+
+    grid = LegendreExtremaGrid(24, -1, 1)
+
+    assert grid.zg.dtype == np.float64
+    assert grid.D(1).dtype == np.float64
+    assert grid.D(2).dtype == np.float64
+
+
+def test_legendre_grid_construction_is_warning_free():
+    import warnings
+
+    from psecas import LegendreExtremaGrid
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        LegendreExtremaGrid(24, -1, 1)
+
+
+def test_legendre_interpolation_accuracy_is_domain_independent():
+    """
+    Fitting on the physical grid rather than the standard interval made
+    accuracy depend on where the domain sat: the same Gaussian interpolated
+    100x worse on [0, 10] than on [-1, 1].
+    """
+    import numpy as np
+    from psecas import LegendreExtremaGrid
+
+    def error_on(zmin, zmax):
+        grid = LegendreExtremaGrid(32, zmin, zmax)
+        centre, width = (zmin + zmax) / 2, 0.1 * (zmax - zmin)
+        f = np.exp(-((grid.zg - centre) / width) ** 2)
+
+        z = np.linspace(zmin, zmax, 501)
+        exact = np.exp(-((z - centre) / width) ** 2)
+        return np.abs(grid.interpolate(z, f) - exact).max()
+
+    reference = error_on(-1, 1)
+    for zmin, zmax in [(0, 1), (0, 10), (-5, 5)]:
+        assert error_on(zmin, zmax) == pytest.approx(reference, rel=1e-6)

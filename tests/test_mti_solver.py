@@ -33,8 +33,6 @@ def test_mti_solution(show=False, verbose=False):
 
     np.testing.assert_allclose(1.7814514515967603, omega, atol=1e-8)
 
-    return err
-
 
 if __name__ == '__main__':
-    err = test_mti_solution(show=True, verbose=True)
+    test_mti_solution(show=True, verbose=True)

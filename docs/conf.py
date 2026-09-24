@@ -18,7 +18,7 @@
 # -- Project information -----------------------------------------------------
 
 project = 'Psecas'
-copyright = '2020, Thomas Berlok'
+copyright = '2019-2026, Thomas Berlok and contributors'
 author = 'Thomas Berlok'
 
 

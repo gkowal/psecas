@@ -1,3 +1,5 @@
+import numpy as np
+
 class Channel:
     """The linearized equations for channel mode, equation 17 in
 
@@ -46,7 +48,6 @@ class Channel:
     def make_background(self):
         """Functing for creating the background profiles.
         Returns symbolic expressions (as a function of z) """
-        import numpy as np
 
         zg = self.grid.zg
 

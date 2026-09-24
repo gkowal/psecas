@@ -1,4 +1,25 @@
+from datetime import datetime
+from numpy import arange
+from numpy import float64
+import os
+import pickle
+import shutil
+import socket
+
+# mpi4py is imported inside the methods that use it. It is an optional
+# dependency (pyproject.toml extra 'mpi'), and psecas/__init__.py imports
+# this module unconditionally, so `import psecas` must work without it.
+
+
 class IO:
+    """
+    Distribute a parameter sweep over MPI ranks and record what was run.
+
+    Creates the output directory, copies the driving script next to the
+    data, writes a log with the host, git commit and timing, and hands
+    each rank its slice of the problem indices via index_local.
+    """
+
     def __init__(self, system, data_folder, experiment, steps, tag=""):
         """
         Initialisation creates the output directory and saves the path to the
@@ -8,7 +29,6 @@ class IO:
         """
         from mpi4py.MPI import COMM_WORLD as comm
         from mpi4py.MPI import Wtime
-        from numpy import arange
 
         self.system = system
 
@@ -17,38 +37,47 @@ class IO:
         self.index_local = self.index_global[comm.rank :: comm.size]
         self.steps_local = len(self.index_local)
 
-        # Folder where data is stored
-        assert data_folder[-1] == "/", "data_folder should end with /"
-        self.data_folder = data_folder
+        # Folder where data is stored. Accept it with or without a trailing
+        # separator rather than asserting on one; asserts are stripped by
+        # python -O, and os.path.join does the right thing either way.
+
+        self.data_folder = os.path.join(data_folder, "")
+        self.logfile = os.path.join(self.data_folder, "psecas.log")
 
         if comm.rank == 0:
             import subprocess
-            from datetime import datetime
-            from numpy import float64
 
-            # Create datafolder
-            subprocess.call("mkdir " + self.data_folder, shell=True)
+            # Create datafolder.
+            #
+            # This used to be subprocess.call("mkdir " + folder, shell=True):
+            # the name was interpolated unquoted into a shell command, so a
+            # path containing a space, a semicolon or a $ misbehaved or ran
+            # as code, and mkdir without -p failed on an existing directory
+            # with the non-zero status discarded.
+            os.makedirs(self.data_folder, exist_ok=True)
 
-            # Copy the experiment to the data folder
-            # experiment = path.basename(experiment)
-            subprocess.call(
-                "cp " + experiment + " " + data_folder + experiment,
-                shell=True,
-            )
+            # Copy the experiment script next to the data. The old version
+            # built its destination as data_folder + experiment, which broke
+            # whenever `experiment` carried a directory prefix.
+            shutil.copy(experiment, os.path.join(self.data_folder,
+                                                 os.path.basename(experiment)))
             info = {"experiment": experiment}
 
-            # Save git commit number
+            # Save git commit number. Not being in a repository, or not
+            # having git installed, is not an error worth stopping a run for.
             try:
-                git_commit = subprocess.check_output(["git", "rev-parse", "HEAD"])
-                git_commit = git_commit.strip().decode("utf-8")
-                info.update({"git_commit": git_commit})
-            except:
+                git_commit = subprocess.check_output(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=os.path.dirname(os.path.abspath(experiment)) or ".",
+                    stderr=subprocess.DEVNULL,
+                )
+                info.update({"git_commit": git_commit.strip().decode("utf-8")})
+            except (OSError, subprocess.SubprocessError):
+                # A bare except here also swallowed KeyboardInterrupt.
                 pass
 
             # Save the hostname
-            hostname = subprocess.check_output(["hostname"])
-            hostname = hostname.strip().decode("utf-8")
-            info.update({"hostname": hostname})
+            info.update({"hostname": socket.gethostname()})
 
             # Save the time at the start of simulation
             i = datetime.now()
@@ -71,34 +100,33 @@ class IO:
             # pickle.dump(info, open(data_folder+'info.p', 'wb'))
 
             # Start a log file
-            f = open(self.data_folder + "psecas.log", "w")
-
-            f.write("Log file for EVP run\n")
-            f.write(
-                "Solving {} evp problems on {} processors\n\n".format(
-                    self.steps, comm.size
+            with open(self.logfile, "w") as f:
+                f.write("Log file for EVP run\n")
+                f.write(
+                    "Solving {} evp problems on {} processors\n\n".format(
+                        self.steps, comm.size
+                    )
                 )
-            )
-            # Write start date and time
-            f.write("Calculation started on " + simulation_start + "\n\n")
-            # Write the contents of info.p for convenience
-            f.write("Contents of info.p is printed below \n")
-            for key in info.keys():
-                f.write(key + " = {} \n".format(info[key]))
+                # Write start date and time
+                f.write("Calculation started on " + simulation_start + "\n\n")
+                # Write the contents of info.p for convenience
+                f.write("Contents of info.p is printed below \n")
+                for key in info.keys():
+                    f.write(key + " = {} \n".format(info[key]))
 
-            f.write("\nContents of system is printed below \n")
-            for key in self.system.__dict__.keys():
-                if type(self.system.__dict__[key]) in (float, int, list):
-                    f.write(key + " = {}\n".format(self.system.__dict__[key]))
+                f.write("\nContents of system is printed below \n")
+                for key in self.system.__dict__.keys():
+                    if type(self.system.__dict__[key]) in (float, int, list):
+                        f.write(key + " = {}\n".format(
+                            self.system.__dict__[key]))
 
-            grid = self.system.grid
-            f.write("\nUsing {} with\n".format(type(grid)))
-            for key in grid.__dict__.keys():
-                if type(grid.__dict__[key]) in (float, float64, int):
-                    f.write(key + " = {} \n".format(grid.__dict__[key]))
+                grid = self.system.grid
+                f.write("\nUsing {} with\n".format(type(grid)))
+                for key in grid.__dict__.keys():
+                    if type(grid.__dict__[key]) in (float, float64, int):
+                        f.write(key + " = {} \n".format(grid.__dict__[key]))
 
-            f.write("\n\nEntering main calculation loop \n")
-            f.close()
+                f.write("\n\nEntering main calculation loop \n")
 
         # Used for computing total runtime
         self.wt = Wtime()
@@ -107,35 +135,38 @@ class IO:
         comm.barrier()
 
     def log(self, i, time, custom_str):
+        """Append a progress line for the i-th local problem."""
         from mpi4py.MPI import COMM_WORLD as comm
 
-        f = open(self.data_folder + "psecas.log", "a")
+        # steps_local is zero on ranks that were handed no work, which
+        # happens whenever there are more processes than problems.
+        percent = 100.0 * (i + 1) / self.steps_local if self.steps_local else 100.0
+
         msg = (
             "Solved EVP with "
             + custom_str
             + " in {:1.2f} seconds. \
                Rank {} is {:2.0f}% done.\n"
         )
-        f.write(msg.format(time, comm.rank, (i + 1) / self.steps_local * 100))
-        f.close()
+        with open(self.logfile, "a") as f:
+            f.write(msg.format(time, comm.rank, percent))
 
     def rank_log(self, string):
+        """Append an arbitrary message to the log, tagged with the rank."""
         from mpi4py.MPI import COMM_WORLD as comm
 
-        f = open(self.data_folder + "psecas.log", "a")
-        msg = (
-            "Rank {}:".format(comm.rank) + string
-        )
-        f.write(msg)
-        f.close()
+        with open(self.logfile, "a") as f:
+            f.write("Rank {}:".format(comm.rank) + string)
 
     def save_system(self, i):
-        import pickle
+        """Pickle the current system under its global problem index."""
 
-        file = self.data_folder + "globalid-{:04d}.p".format(
-            self.index_local[i]
+        path = os.path.join(
+            self.data_folder,
+            "globalid-{:04d}.p".format(self.index_local[i]),
         )
-        pickle.dump(self.system, open(file, "wb"))
+        with open(path, "wb") as f:
+            pickle.dump(self.system, f)
 
     def finished(self):
         """Write elapsed time to log file and move the log file to the data
@@ -149,14 +180,11 @@ class IO:
         seconds = Wtime() - self.wt
         if comm.rank == 0:
             # import subprocess
-            from datetime import datetime
 
             # Time at end of simulation
             i = datetime.now()
             endtime = i.strftime("%d/%m/%Y at %H:%M:%S")
 
-            f = open(self.data_folder + "psecas.log", "a")
-            f.write("\nCalculation ended on " + endtime + "\n")
             m, s = divmod(seconds, 60)
             h, m = divmod(m, 60)
             d, h = divmod(h, 24)
@@ -164,5 +192,6 @@ class IO:
             msg = (
                 "Time elapsed was {} days {} hours {} minutes {:1.4} seconds"
             )
-            f.write(msg.format(d, h, m, s))
-            f.close()
+            with open(self.logfile, "a") as f:
+                f.write("\nCalculation ended on " + endtime + "\n")
+                f.write(msg.format(d, h, m, s))

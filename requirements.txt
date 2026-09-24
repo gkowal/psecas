@@ -1,6 +1,14 @@
+# Runtime dependencies. Prefer `pip install -e .` which reads pyproject.toml;
+# this file is kept for the existing `pip install -r requirements.txt` flow.
 numpy
 matplotlib
 scipy
 sympy
+
+# Testing
 pytest
-git+https://github.com/tberlok/dmsuite.git
+
+# Optional: only HermiteGrid and LaguerreGrid need this. It is an unreleased
+# personal fork, pinned so those grids cannot change underneath a
+# reproducible calculation.
+dmsuite @ git+https://github.com/tberlok/dmsuite.git@0c02f23bf4f08ea82d54da1abb542b56908970d0

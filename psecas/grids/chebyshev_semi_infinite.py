@@ -1,7 +1,10 @@
-from psecas.grids.grid import Grid
+from psecas.grids.grid import Grid, InfiniteGrid
+from numpy.polynomial.chebyshev import chebfit
+from numpy.polynomial.chebyshev import chebval
+import numpy as np
 
 
-class ChebyshevTLnGrid(Grid):
+class ChebyshevTLnGrid(InfiniteGrid, Grid):
     """
     This grid uses Rational Chebyshev functions on y ∈ [0, ∞], the TLn(y)
     functions, to dicretize the system (Boyd page 369 and Table E.7 p. 558)
@@ -17,49 +20,7 @@ class ChebyshevTLnGrid(Grid):
     maximum values of the grid depend on both N and C.
     """
 
-    def __init__(self, N, C=1, z="z", max_derivative_order=2):
-        self._observers = []
-
-        self._N = N
-        self._C = C
-        self._max_derivative_order = int(max_derivative_order)
-        self._d = []
-        self.make_grid()
-
-        # Grid variable name
-        self.z = z
-
-    def bind_to(self, callback):
-        self._observers.append(callback)
-
-    @property
-    def N(self):
-        return self._N
-
-    @N.setter
-    def N(self, value):
-        self._N = value
-        self.make_grid()
-
-    @property
-    def zmin(self):
-        return self.zg.min()
-
-    @property
-    def zmax(self):
-        return self.zg.max()
-
-    @property
-    def C(self):
-        return self._C
-
-    @C.setter
-    def C(self, value):
-        self._C = value
-        self.make_grid()
-
     def cheb_roots(self, N):
-        import numpy as np
 
         zg = np.cos(np.pi * (2 * np.arange(1, N + 1) - 1) / (2 * N))
         zg = zg[::-1]
@@ -74,7 +35,8 @@ class ChebyshevTLnGrid(Grid):
         return (zg, d1)
 
     def make_grid(self):
-        import numpy as np
+        """Build the nodes zg and the differentiation matrices, then notify
+        any objects bound to this grid."""
 
         C = self.C
         self.NN = self.N + 1
@@ -103,7 +65,6 @@ class ChebyshevTLnGrid(Grid):
 
     def to_coefficients(self, f):
         """Convert from grid values to coefficients"""
-        from numpy.polynomial.chebyshev import chebfit
 
         # Convert semi-infinite grid to xg = [-1, 1]
         xg = (self.zg - self.C) / (self.zg + self.C)
@@ -115,7 +76,6 @@ class ChebyshevTLnGrid(Grid):
 
     def to_grid(self, c):
         """Convert from coefficients to grid values"""
-        from numpy.polynomial.chebyshev import chebval
 
         # Convert semi-infinite grid to xg = [-1, 1]
         x = (self.zg - self.C) / (self.zg + self.C)
@@ -125,7 +85,6 @@ class ChebyshevTLnGrid(Grid):
 
     def interpolate(self, z, f):
         """See equations 17.37 and 17.38 in Boyd"""
-        from numpy.polynomial.chebyshev import chebval
 
         # Get coefficients for standard Chebyshev polynomials
         c = self.to_coefficients(f)
