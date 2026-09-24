@@ -107,6 +107,11 @@ $ ~/.venv/bin/python -m pip install -e '.[test]'
 $ ~/.venv/bin/python -m pytest
 ```
 
+The GPU tests in `tests/test_dense_eig.py` are skipped unless the interpreter
+has CuPy and sees a GPU. `PSECAS_EIG_BACKEND=cupy pytest` runs the whole suite
+with every dense solve forced onto the GPU. Expect `test_channel` to fail
+there: its pencil is one the GPU path refuses (see below).
+
 ### Overview of the code
 Psecas consist of three main classes
 
@@ -168,6 +173,52 @@ normwise backward error above `Solver.GEVP_RESIDUAL_TOL`, the solve falls
 back to QZ with a `RuntimeWarning`. This happens when M₂'s entries span
 many decades, where the balancing inside the standard solver returns
 correct eigenvalues but meaningless eigenvectors.
+
+#### GPU eigensolver
+
+The full dense solves (`solve`, `solve_full`, and the full solves inside the
+iterative drivers) run on an NVIDIA GPU when [CuPy](https://cupy.dev) ≥ 14 is
+installed and a GPU is present. Nothing else changes. For a generalized EVP
+the backend takes the place of QZ, so it applies with `gevp_method='qz'`. The
+shift-invert `solve_mode` and `gevp_method='shift-invert'` both stay on the
+CPU and use SciPy, whatever `backend` says.
+
+```bash
+# CUDA 13, the "CUDA Version" that nvidia-smi reports
+pip install -e '.[gpu]'
+# CUDA 12
+pip install -e '.[gpu-cuda12]'
+```
+
+pip cannot detect the CUDA version, so the extra has to be chosen by hand.
+Both bring the CUDA runtime libraries from pip, so only an NVIDIA driver is
+needed. Install only one CuPy package; `pip freeze | grep cupy` shows which is
+present. Google Colab's GPU runtime already ships CuPy for CUDA 13.
+
+`Solver(grid, system, backend=...)` selects the backend:
+
+- `"auto"` (default): GPU when CuPy works and the matrix has at least
+  `solver.gpu_min_size` rows (default 400; smaller dense problems are no
+  faster on the GPU), SciPy otherwise. Falls back to SciPy, with a warning,
+  when the GPU cannot handle a problem.
+- `"cupy"`: always the GPU; raises if it cannot be used.
+- `"scipy"`: always `scipy.linalg.eig`, as before.
+
+The environment variable `PSECAS_EIG_BACKEND=scipy|cupy|auto` overrides
+`"auto"` without touching your scripts, and `solver.last_backend` tells which
+backend produced the last solve. The solve runs in the precision of the
+matrices, i.e. double.
+
+CuPy has no generalized eigensolver, so `M₁ v = σ M₂ v` is reduced on the CPU
+before the GPU solve. The all-zero rows of M₂ (the boundary-condition rows)
+are removed exactly, and the rest becomes `M₂'⁻¹ M₁'`. This is refused, and
+`"auto"` falls back to SciPy's QZ, when the constraints are rank-deficient or
+M₂' is singular or too ill-conditioned (condition number above about 5e11).
+An example is a left-hand side weighted by `exp(-z²/2)` on a semi-infinite
+grid. Two differences from QZ remain: the eigenvalue order differs, and the
+infinite eigenvalues come back as `+inf` with zero eigenvectors. As with QZ,
+`filter_modes` drops them and the default `sorting_strategy` sets them to
+zero.
 
 #### Writing equations
 
