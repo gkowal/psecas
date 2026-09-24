@@ -1,7 +1,7 @@
 from .string_methods import contains_symbol as _contains_symbol
 from numpy.linalg import inv
 from scipy import sparse
-from scipy.linalg import eig
+from scipy.linalg import eig, lu_factor, lu_solve
 from scipy.sparse.linalg import eigs
 from scipy.sparse.linalg import eigs, splu, LinearOperator
 import builtins
@@ -124,6 +124,66 @@ def _rel_residual(A, B, σ, v):
     return np.linalg.norm(Av - σ * Bv) / denom
 
 
+def _eig_shift_invert(A, B, shift, residual_tol):
+    """
+    All eigenpairs of the dense pencil (A, B) through the equivalent standard
+    problem
+
+        C w = θ w,    C = (A - sB)⁻¹ B,    σ = s + 1/θ,
+
+    which has the same eigenvectors.  scipy's QZ (zggev) is serial and several
+    times slower than the standard solver (zgeev) that runs on C, which is
+    also threaded by BLAS.
+
+    θ = 0 belongs to an infinite eigenvalue (B singular, e.g. through zeroed
+    boundary rows).  Rounding leaves such θ at about eps‖C‖ rather than at
+    zero, so everything below n·eps‖C‖ is reported as infinite, which is how
+    QZ reports them too.
+
+    zgeev balances C by diagonal scaling before reducing it, and QZ does not.
+    When the entries of B span many decades -- a background that decays like
+    exp(-z²/2) on a semi-infinite grid does this -- the balanced problem can
+    return correct eigenvalues with meaningless eigenvectors.  Every finite
+    eigenpair is therefore checked against the original pencil through its
+    normwise backward error.
+
+    Returns (Σ, V), or None if A - sB is singular or any finite eigenpair
+    has a backward error above residual_tol.  The caller is expected to
+    fall back to QZ in that case.
+    """
+
+    n = A.shape[0]
+    lu, piv = lu_factor(A - shift * B, check_finite=False)
+    if np.any(np.diag(lu) == 0):
+        return None
+
+    C = lu_solve((lu, piv), B, check_finite=False)
+    tiny = n * np.finfo(float).eps * np.linalg.norm(C, 1)
+    Θ, V = eig(C, overwrite_a=True, check_finite=False)
+
+    finite = np.abs(Θ) > tiny
+    Σ = np.full(n, np.inf, dtype=complex)
+    Σ[finite] = shift + 1 / Θ[finite]
+
+    # Normwise backward error of every finite eigenpair,
+    #
+    #     ‖Av - σBv‖ / ((‖A‖ + |σ|‖B‖) ‖v‖),
+    #
+    # which QZ keeps near machine precision.  _rel_residual() normalises by
+    # ‖Av‖ + |σ|‖Bv‖ instead, which suits one mode near a guess but not a
+    # whole spectrum: QZ's own spurious modes reach O(1) by that measure.
+    Vf = V[:, finite]
+    R = A @ Vf - (B @ Vf) * Σ[finite]
+    scale = (np.linalg.norm(A) + np.abs(Σ[finite]) * np.linalg.norm(B)) \
+        * np.linalg.norm(Vf, axis=0)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        backward_errors = np.linalg.norm(R, axis=0) / scale
+    if not np.all(backward_errors <= residual_tol):
+        return None
+
+    return Σ, V
+
+
 class Solver:
     """
     Assemble and solve the (generalized) eigenvalue problem defined by a
@@ -146,6 +206,20 @@ class Solver:
         parameters.
     do_gen_evp : bool (default False)
         Force the generalized formulation even when a standard EVP would do.
+    gevp_method : {'qz', 'shift-invert'} (default 'qz')
+        How the full dense solves (solve, solve_full) treat a generalized
+        EVP.  'qz' calls scipy's QZ algorithm directly.  'shift-invert'
+        solves the equivalent standard EVP for (M₁ - sM₂)⁻¹M₂ instead,
+        which is several times faster and, unlike QZ, uses every BLAS
+        thread, so it suits a single solve on an otherwise idle machine.
+        Its eigenpairs are checked against the original pencil and the
+        solve falls back to QZ, with a RuntimeWarning, if any fails.  A
+        standard EVP is unaffected.
+    gevp_shift : complex (default 0.1·exp(0.7i))
+        The shift s used by gevp_method='shift-invert'.  Eigenvalues near s
+        are the most accurate, so it should lie in the region of interest
+        but not on an eigenvalue; the default avoids the real and imaginary
+        axes, where marginal and purely growing modes sit.
 
     Main entry points
     -----------------
@@ -156,7 +230,28 @@ class Solver:
     iterate_solve_multimode Resolution sweep tracking several modes.
     """
 
-    def __init__(self, grid, system, do_gen_evp=False):
+    #: Accepted values of the gevp_method argument.
+    GEVP_METHODS = ('qz', 'shift-invert')
+
+    #: Default shift for gevp_method='shift-invert'.
+    GEVP_SHIFT = 0.1 * np.exp(0.7j)
+
+    #: Largest normwise backward error a shift-invert eigenpair may have
+    #: before the solve falls back to QZ.  QZ stays below about 1e-14 on the
+    #: systems in the test suite and shift-invert below about 1e-11 where it
+    #: works; where zgeev's balancing breaks it, the error is 1e-3 or more.
+    GEVP_RESIDUAL_TOL = 1e-9
+
+    def __init__(self, grid, system, do_gen_evp=False, gevp_method='qz',
+                 gevp_shift=None):
+
+        if gevp_method not in self.GEVP_METHODS:
+            raise ValueError(
+                "gevp_method must be one of {}, not {!r}"
+                .format(self.GEVP_METHODS, gevp_method)
+            )
+        self.gevp_method = gevp_method
+        self.gevp_shift = self.GEVP_SHIFT if gevp_shift is None else gevp_shift
 
         # Grid object
         self.grid = grid
@@ -302,16 +397,37 @@ class Solver:
         """
 
         self.get_matrix1()
-
-        # Solve a generalized EVP
         if self.do_gen_evp:
             self.get_matrix2()
-            Σ, V = eig(self.mat1.toarray(), self.mat2.toarray())
-        # Solve a standard EVP
-        else:
-            Σ, V = eig(self.mat1.toarray())
 
-        return Σ, V
+        return self._eig_dense()
+
+    def _eig_dense(self):
+        """
+        Every eigenpair of the assembled problem, as a full dense solve.
+
+        mat1 (and mat2 for a generalized EVP) must be up to date.  A
+        generalized EVP is solved as gevp_method says.
+        """
+
+        A = self.mat1.toarray()
+        if not self.do_gen_evp:
+            return eig(A)
+
+        B = self.mat2.toarray()
+        if self.gevp_method == 'shift-invert':
+            result = _eig_shift_invert(A, B, self.gevp_shift,
+                                       self.GEVP_RESIDUAL_TOL)
+            if result is not None:
+                return result
+            warnings.warn(
+                "The shift-invert dense solve (gevp_shift={}) failed its "
+                "residual check or hit a singular shift; falling back to QZ."
+                .format(self.gevp_shift),
+                RuntimeWarning, stacklevel=3,
+            )
+
+        return eig(A, B)
 
 
     def solve_mode(self, guess, v0=None, useOPinv=True, verbose=False,
@@ -1056,14 +1172,10 @@ class Solver:
 
         # Calculate right-hand matrix
         self.get_matrix1()
-
-        # Solve a generalized EVP
         if self.do_gen_evp:
             self.get_matrix2()
-            E, V = eig(self.mat1.toarray(), self.mat2.toarray())
-        # Solve a standard EVP
-        else:
-            E, V = eig(self.mat1.toarray())
+
+        E, V = self._eig_dense()
 
         # Sort the eigenvalues
         E, index = self.sorting_strategy(E)

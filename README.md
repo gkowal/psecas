@@ -152,6 +152,23 @@ because an unverified shift-invert result tends to sit near the guess it was
 given, which a driver that measures convergence by comparing successive
 eigenvalues will read as convergence.
 
+#### Dense generalized solves
+
+`solve` and `solve_full` hand a generalized EVP to scipy's QZ algorithm by
+default. `Solver(grid, system, gevp_method='shift-invert')` solves the
+equivalent standard EVP for (M₁ − sM₂)⁻¹M₂ instead, with σ = s + 1/θ. It
+returns the same spectrum, with infinite eigenvalues for a singular M₂, and
+is 4–9 times faster on the tearing problem (802–1402 unknowns) even on one
+thread. It also uses every BLAS thread, which QZ does not, so it helps most
+for a single solve on an otherwise idle machine. The shift s is set with
+`gevp_shift`.
+
+Every finite eigenpair is checked against the original pencil. If any has a
+normwise backward error above `Solver.GEVP_RESIDUAL_TOL`, the solve falls
+back to QZ with a `RuntimeWarning`. This happens when M₂'s entries span
+many decades, where the balancing inside the standard solver returns
+correct eigenvalues but meaningless eigenvectors.
+
 #### Writing equations
 
 Equations are strings. `dz(f)` and `dz(dz(f))` are first and second
