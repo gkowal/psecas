@@ -238,7 +238,9 @@ def _reduced_geig(A, B, standard_eig):
         E[:m] = w
         V[Ji, :m] = v
         V[Jb, :m] = T @ v
-        V[:, :m] /= np.linalg.norm(V[:, :m], axis=0)
+        # A zero or NaN column becomes NaN here, which the check refuses.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            V[:, :m] /= np.linalg.norm(V[:, :m], axis=0)
     return E, V
 
 
@@ -255,16 +257,17 @@ def _backward_errors(A, B, E, V):
     Computed on the host. It costs one or two matrix products, small next to
     the O(n³) eigensolve with its much larger constant.
     """
-    AV = A @ V
-    if B is None:
-        R = AV - V * E
-        norm_B = np.sqrt(A.shape[0])
-    else:
-        R = AV - (B @ V) * E
-        norm_B = np.linalg.norm(B)
-    scale = (np.linalg.norm(A) + np.abs(E) * norm_B) \
-        * np.linalg.norm(V, axis=0)
+    # inf * 0 and 0 / 0 are expected for the pairs this is meant to refuse.
     with np.errstate(divide="ignore", invalid="ignore"):
+        AV = A @ V
+        if B is None:
+            R = AV - V * E
+            norm_B = np.sqrt(A.shape[0])
+        else:
+            R = AV - (B @ V) * E
+            norm_B = np.linalg.norm(B)
+        scale = (np.linalg.norm(A) + np.abs(E) * norm_B) \
+            * np.linalg.norm(V, axis=0)
         return np.linalg.norm(R, axis=0) / scale
 
 
