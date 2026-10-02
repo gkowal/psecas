@@ -38,7 +38,11 @@ def _dominant(solver):
     E, _ = eig(solver.mat1.toarray(), solver.mat2.toarray())
     E = E[np.isfinite(E)]
     E = E[E.real > 0]
-    return E[np.argmax(E.real)]
+    # The dominant mode is one of a complex-conjugate pair whose real parts
+    # agree to rounding (~1e-16), so which member argmax picks depends on
+    # the LAPACK build. Return the member with Im >= 0.
+    σ = E[np.argmax(E.real)]
+    return complex(σ.real, abs(σ.imag))
 
 
 def test_variable_naming_follows_the_flag():
