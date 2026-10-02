@@ -109,8 +109,9 @@ $ ~/.venv/bin/python -m pytest
 
 The GPU tests in `tests/test_dense_eig.py` are skipped unless the interpreter
 has CuPy and sees a GPU. `PSECAS_EIG_BACKEND=cupy pytest` runs the whole suite
-with every dense solve forced onto the GPU. Expect `test_channel` to fail
-there: its pencil is one the GPU path refuses (see below).
+with every dense solve forced onto the GPU. Expect `test_channel` and
+`test_balancing_failure_falls_back_to_qz` to fail there: both use the channel
+pencil, which the GPU path refuses (see below).
 
 ### Overview of the code
 Psecas consist of three main classes
