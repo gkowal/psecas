@@ -238,6 +238,179 @@ def test_deflation_rejects_ill_conditioned_b():
         dense_eig._reduced_geig(A, B, scipy.linalg.eig)
 
 
+# -- backward-error check (CPU, SciPy standing in for the GPU) --------------
+
+def _graded_pencil(L, n=60, k=4):
+    """_constrained_pencil with B' = diag(exp(-z²/2)) on [0, L]: B' passes
+    the condition limit up to L = 7, but by L = 7 the reduction B'⁻¹A'
+    loses most of its digits."""
+    A, B = _constrained_pencil(n=n, k=k)
+    B[B == 1] = np.exp(-np.linspace(0, L, n - k) ** 2 / 2)
+    return A, B
+
+
+def _fake_gpu_eig(monkeypatch, standard_eig):
+    """Fake only the GPU's standard solve, so the reduction and the check
+    run for real."""
+    monkeypatch.setattr(dense_eig, "_probe_cupy", lambda: (True, None))
+    monkeypatch.setattr(dense_eig, "_cupy_errors", lambda: (MemoryError,))
+    monkeypatch.setattr(dense_eig, "_cupy_eig", standard_eig)
+
+
+def test_check_rejects_inaccurate_reduction():
+    A, B = _graded_pencil(L=7)
+    with pytest.raises(np.linalg.LinAlgError,
+                       match="failed the backward-error check"):
+        dense_eig._cupy_solve(A, B, scipy.linalg.eig)
+
+
+def test_check_accepts_accurate_reduction_unchanged():
+    A, B = _graded_pencil(L=4)
+    E, V = dense_eig._cupy_solve(A, B, scipy.linalg.eig)
+    E_ref, V_ref = dense_eig._reduced_geig(A, B, scipy.linalg.eig)
+    np.testing.assert_array_equal(E, E_ref)
+    np.testing.assert_array_equal(V, V_ref)
+    assert _max_residual(A, B, E, V) < 1e-12
+
+
+def test_auto_falls_back_when_the_check_fails(monkeypatch):
+    _fake_gpu_eig(monkeypatch, scipy.linalg.eig)
+    A, B = _graded_pencil(L=7)
+    with pytest.warns(RuntimeWarning, match="backward-error check"):
+        E, V, used = dense_eig.eig(A, B, backend="auto", min_size=0,
+                                   return_backend=True)
+    assert used == "scipy"
+    E_ref, V_ref = scipy.linalg.eig(A, B)
+    np.testing.assert_array_equal(E, E_ref)
+    np.testing.assert_array_equal(V, V_ref)
+    with pytest.raises(np.linalg.LinAlgError, match="backward-error check"):
+        dense_eig.eig(A, B, backend="cupy")
+
+
+def test_auto_keeps_a_good_gpu_result(monkeypatch):
+    _fake_gpu_eig(monkeypatch, scipy.linalg.eig)
+    A, B = _graded_pencil(L=4)
+    for b in (None, B):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            _, _, used = dense_eig.eig(A, b, backend="auto", min_size=0,
+                                       return_backend=True)
+        assert used == "cupy"
+
+
+def test_check_rejects_corrupted_standard_eigenvectors(monkeypatch):
+    def corrupted_eig(M):
+        w, v = scipy.linalg.eig(M)
+        rng = np.random.default_rng(1)
+        return w, v + 1e-6 * rng.standard_normal(v.shape)
+    _fake_gpu_eig(monkeypatch, corrupted_eig)
+    A, _ = _constrained_pencil(n=40)
+    with pytest.raises(np.linalg.LinAlgError, match="backward-error check"):
+        dense_eig.eig(A, backend="cupy")
+    with pytest.warns(RuntimeWarning, match="backward-error check"):
+        E, V, used = dense_eig.eig(A, backend="auto", min_size=0,
+                                   return_backend=True)
+    assert used == "scipy"
+    E_ref, V_ref = scipy.linalg.eig(A)
+    np.testing.assert_array_equal(E, E_ref)
+    np.testing.assert_array_equal(V, V_ref)
+
+
+def test_check_rejects_zero_and_nan_pairs():
+    A, _ = _constrained_pencil(n=10)
+    w, v = scipy.linalg.eig(A)
+    for bad in (0.0, np.nan):
+        v_bad = v.copy()
+        v_bad[:, 3] = bad
+        with pytest.raises(np.linalg.LinAlgError, match="backward-error"):
+            dense_eig._verify(A, None, w, v_bad)
+
+
+def test_check_refuses_infinite_pairs_on_the_standard_path(monkeypatch):
+    # The standard problem has no infinite eigenvalues: (+inf, 0) there is
+    # garbage, not a deflated row.
+    A, _ = _constrained_pencil(n=10)
+    w, v = scipy.linalg.eig(A)
+    w[3], v[:, 3] = np.inf, 0
+    with pytest.raises(np.linalg.LinAlgError, match="backward-error check"):
+        dense_eig._verify(A, None, w, v)
+
+    def inf_eig(M):
+        w, v = scipy.linalg.eig(M)
+        w[3], v[:, 3] = np.inf, 0
+        return w, v
+    _fake_gpu_eig(monkeypatch, inf_eig)
+    with pytest.raises(np.linalg.LinAlgError, match="backward-error check"):
+        dense_eig.eig(A, backend="cupy")
+
+
+def test_check_refuses_infinite_pairs_without_zero_rows_in_b(monkeypatch):
+    def inf_eig(M):
+        w, v = scipy.linalg.eig(M)
+        w[3], v[:, 3] = np.inf, 0
+        return w, v
+    _fake_gpu_eig(monkeypatch, inf_eig)
+    A, B = _constrained_pencil(n=20, k=0)
+    with pytest.raises(np.linalg.LinAlgError, match="backward-error check"):
+        dense_eig.eig(A, B, backend="cupy")
+
+
+def test_check_refuses_inf_with_nonzero_vector():
+    A, _ = _constrained_pencil(n=10)
+    w, v = scipy.linalg.eig(A)
+    w[3] = np.inf
+    with pytest.raises(np.linalg.LinAlgError, match="backward-error check"):
+        dense_eig._verify(A, None, w, v)
+
+
+def test_check_refuses_misplaced_or_extra_infinite_pairs():
+    A, B = _graded_pencil(L=4)
+    E, V = dense_eig._reduced_geig(A, B, scipy.linalg.eig)
+    k = np.count_nonzero(~B.any(axis=1))
+    dense_eig._verify(A, B, E, V, n_inf=k)
+    # One more (+inf, 0) among the finite pairs.
+    E_bad, V_bad = E.copy(), V.copy()
+    E_bad[0], V_bad[:, 0] = np.inf, 0
+    with pytest.raises(np.linalg.LinAlgError, match="backward-error check"):
+        dense_eig._verify(A, B, E_bad, V_bad, n_inf=k)
+    # A deflated slot that is not (+inf, 0).
+    E_bad, V_bad = E.copy(), V.copy()
+    V_bad[0, -1] = 1
+    with pytest.raises(np.linalg.LinAlgError, match="backward-error check"):
+        dense_eig._verify(A, B, E_bad, V_bad, n_inf=k)
+
+
+def test_check_refuses_nan_pairs_on_the_generalized_path(monkeypatch):
+    def nan_eig(M):
+        w, v = scipy.linalg.eig(M)
+        v[:, 2] = np.nan
+        return w, v
+    _fake_gpu_eig(monkeypatch, nan_eig)
+    A, B = _graded_pencil(L=4)
+    with pytest.raises(np.linalg.LinAlgError, match="backward-error check"):
+        dense_eig.eig(A, B, backend="cupy")
+    with pytest.warns(RuntimeWarning, match="backward-error check"):
+        _, _, used = dense_eig.eig(A, B, backend="auto", min_size=0,
+                                   return_backend=True)
+    assert used == "scipy"
+
+
+def test_tolerance_matches_the_shift_invert_check():
+    assert dense_eig.RESIDUAL_TOL == Solver.GEVP_RESIDUAL_TOL
+
+
+def test_tolerance_is_pinned():
+    # n=60, L=6 gives a backward error of about 1.3e-8: refused at 1e-9,
+    # accepted if the tolerance were loosened to 1e-6.
+    A, B = _graded_pencil(L=6)
+    E, V = dense_eig._reduced_geig(A, B, scipy.linalg.eig)
+    finite = np.isfinite(E)
+    err = dense_eig._backward_errors(A, B, E[finite], V[:, finite]).max()
+    assert 1e-9 < err < 1e-7
+    with pytest.raises(np.linalg.LinAlgError, match="backward-error check"):
+        dense_eig._cupy_solve(A, B, scipy.linalg.eig)
+
+
 # -- GPU ---------------------------------------------------------------------
 
 @gpu
@@ -306,3 +479,10 @@ def test_gpu_auto_is_used_above_the_threshold():
     solver.gpu_min_size = 10 ** 6
     solver.solve_full()
     assert solver.last_backend == "scipy"
+
+
+@gpu
+def test_gpu_refuses_inaccurate_reduction():
+    A, B = _graded_pencil(L=7)
+    with pytest.raises(np.linalg.LinAlgError, match="backward-error check"):
+        dense_eig.eig(A, B, backend="cupy")

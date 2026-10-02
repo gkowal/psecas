@@ -215,8 +215,13 @@ are removed exactly, and the rest becomes `M₂'⁻¹ M₁'`. This is refused, a
 `"auto"` falls back to SciPy's QZ, when the constraints are rank-deficient or
 M₂' is singular or too ill-conditioned (condition number above about 5e11).
 An example is a left-hand side weighted by `exp(-z²/2)` on a semi-infinite
-grid. Two differences from QZ remain: the eigenvalue order differs, and the
-infinite eigenvalues come back as `+inf` with zero eigenvectors. As with QZ,
+grid. A pencil that passes those limits can still lose accuracy in `M₂'⁻¹ M₁'`,
+so every GPU result, standard or generalized, is checked against the original
+matrices. If any finite eigenpair has a normwise backward error
+‖M₁v − σM₂v‖ / ((‖M₁‖ + |σ|‖M₂‖)‖v‖) above 1e-9, the measure and tolerance the
+shift-invert solve uses, the result is refused in the same way. Two
+differences from QZ remain: the eigenvalue order differs, and the infinite
+eigenvalues come back as `+inf` with zero eigenvectors. As with QZ,
 `filter_modes` drops them and the default `sorting_strategy` sets them to
 zero.
 

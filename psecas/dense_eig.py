@@ -13,14 +13,17 @@ cupy
     rows psecas assembles into M₁ only -- are deflated exactly, and the
     remaining nonsingular pencil is turned into ``B'⁻¹ A'`` by LU. Pencils
     outside that class (rank-deficient or ill-conditioned constraints, a
-    singular or ill-conditioned B') raise ``LinAlgError``.
+    singular or ill-conditioned B') raise ``LinAlgError``. Every GPU result
+    is then checked against the original problem: if any finite eigenpair
+    has a normwise backward error above ``RESIDUAL_TOL``, the result is
+    discarded and ``LinAlgError`` is raised.
 
 ``backend="auto"`` uses CuPy when it is installed and a GPU is present and
 the matrix has at least ``min_size`` rows (the GPU does not pay off for
 smaller dense problems), and SciPy otherwise. It falls back to SciPy, with a
-warning, when the GPU path cannot handle a problem. The environment
-variable ``PSECAS_EIG_BACKEND`` overrides "auto" without touching caller
-code.
+warning, when the GPU path cannot handle a problem or its result fails the
+check. The environment variable ``PSECAS_EIG_BACKEND`` overrides "auto"
+without touching caller code.
 """
 import functools
 import os
@@ -39,6 +42,13 @@ ENV_VAR = "PSECAS_EIG_BACKEND"
 #: P6000 against 10-core OpenBLAS, double precision: 0.6-1.3x at n <= 256,
 #: 3-4x from n = 512.
 GPU_MIN_SIZE = 400
+
+#: Largest normwise backward error, ‖Av - σBv‖ / ((‖A‖ + |σ|‖B‖) ‖v‖), that a
+#: finite GPU eigenpair may have before the result is rejected. Matches
+#: Solver.GEVP_RESIDUAL_TOL (psecas.solver is not imported here: it imports
+#: this module at load time). QZ stays near 1e-15 by this measure; the
+#: reduction B'⁻¹A' reaches 1e-5 and more when B' is badly conditioned.
+RESIDUAL_TOL = 1e-9
 
 # Reasons for which a fallback warning has already been issued.
 _warned = set()
@@ -206,6 +216,12 @@ def _reduced_geig(A, B, standard_eig):
     deflated row (the infinite eigenvalues, as QZ reports them). Columns of
     V for finite eigenvalues have unit 2-norm; those for the infinite ones
     are zero.
+
+    The condition limits on the constraint block and on B' only refuse the
+    hopeless cases cheaply; B' can pass them and still give eigenpairs with
+    a large backward error. The result is not checked here: ``_cupy_solve``
+    verifies it against the original pencil and raises LinAlgError if it
+    fails.
     """
     n = A.shape[0]
     C = np.flatnonzero(~B.any(axis=1))
@@ -226,14 +242,84 @@ def _reduced_geig(A, B, standard_eig):
     return E, V
 
 
-def _cupy_solve(a, b):
+def _backward_errors(A, B, E, V):
+    """
+    Normwise backward error of each eigenpair (E[j], V[:, j]) of the pencil
+    (A, B), as in solver._eig_shift_invert:
+
+        ‖Av - σBv‖ / ((‖A‖ + |σ|‖B‖) ‖v‖),
+
+    with Frobenius matrix norms; B = None means the identity. A zero vector
+    or a non-finite pair gives NaN or inf, which fails any tolerance test.
+
+    Computed on the host. It costs one or two matrix products, small next to
+    the O(n³) eigensolve with its much larger constant.
+    """
+    AV = A @ V
+    if B is None:
+        R = AV - V * E
+        norm_B = np.sqrt(A.shape[0])
+    else:
+        R = AV - (B @ V) * E
+        norm_B = np.linalg.norm(B)
+    scale = (np.linalg.norm(A) + np.abs(E) * norm_B) \
+        * np.linalg.norm(V, axis=0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.linalg.norm(R, axis=0) / scale
+
+
+def _verify(A, B, E, V, n_inf=0):
+    """
+    Raise LinAlgError unless every eigenpair other than the expected
+    infinite ones has a backward error of at most RESIDUAL_TOL.
+
+    ``n_inf`` is the number of infinite eigenvalues the result may contain:
+    the deflated zero rows of B on the reduction path, 0 for the standard
+    problem and for a B without zero rows. Exactly the last ``n_inf`` pairs
+    must be ``+inf`` with a zero vector, as ``_reduced_geig`` returns them;
+    they are not checked further. Every other pair is checked, so an
+    infinite or NaN eigenvalue anywhere else fails.
+    """
+    m = E.size - n_inf
+    tail_E, tail_V = E[m:], V[:, m:]
+    if not (np.all(np.isposinf(tail_E.real) & (tail_E.imag == 0))
+            and not tail_V.any()):
+        raise np.linalg.LinAlgError(
+            "GPU eigenpairs failed the backward-error check "
+            "(infinite eigenvalues not where the deflation puts them)")
+    if m == 0:
+        return
+    errors = _backward_errors(A, B, E[:m], V[:, :m])
+    if not np.all(errors <= RESIDUAL_TOL):
+        raise np.linalg.LinAlgError(
+            "GPU eigenpairs failed the backward-error check "
+            "(max {:.1e} > {:.0e})".format(np.max(errors), RESIDUAL_TOL))
+
+
+def _cupy_solve(a, b, standard_eig=None):
+    """
+    Solve on the GPU path and verify the result against ``(a, b)``.
+
+    ``standard_eig(M)`` solves the standard problems and returns host arrays
+    (w, v); it defaults to ``_cupy_eig`` and is a parameter so the whole path,
+    check included, can be tested without a GPU.
+    """
+    if standard_eig is None:
+        standard_eig = _cupy_eig
     if b is None:
         _check_finite(a)
-        return _cupy_eig(np.asarray(a, dtype=_work_dtype(a)))
+        A = np.asarray(a, dtype=_work_dtype(a))
+        E, V = standard_eig(A)
+        _verify(A, None, E, V)
+        return E, V
     _check_finite(a, b)
     dtype = _work_dtype(a, b)
-    return _reduced_geig(np.asarray(a, dtype=dtype),
-                         np.asarray(b, dtype=dtype), _cupy_eig)
+    A = np.asarray(a, dtype=dtype)
+    B = np.asarray(b, dtype=dtype)
+    E, V = _reduced_geig(A, B, standard_eig)
+    # _reduced_geig puts one +inf per all-zero row of B at the end.
+    _verify(A, B, E, V, n_inf=np.count_nonzero(~B.any(axis=1)))
+    return E, V
 
 
 def _warn_fallback(reason):
@@ -257,9 +343,10 @@ def eig(a, b=None, backend="auto", min_size=None, return_backend=False):
         The matrices; ``b=None`` solves the standard problem.
     backend : {"auto", "cupy", "scipy"}
         "scipy" always uses SciPy. "cupy" always uses the GPU and raises if
-        it cannot (CuPy missing, unsupported pencil, GPU error). "auto" uses
-        the GPU when CuPy is available and ``n >= min_size``, and falls back
-        to SciPy with a one-time warning when the GPU path fails.
+        it cannot (CuPy missing, unsupported pencil, GPU error, a result
+        that fails the check below). "auto" uses the GPU when CuPy is
+        available and ``n >= min_size``, and falls back to SciPy with a
+        one-time warning when the GPU path fails.
         ``PSECAS_EIG_BACKEND`` overrides "auto".
     min_size : int, optional
         Smallest n that "auto" sends to the GPU (default GPU_MIN_SIZE).
@@ -272,6 +359,15 @@ def eig(a, b=None, backend="auto", min_size=None, return_backend=False):
     The eigenvalue order is backend-specific; sort or pair them rather than
     comparing positions. For a generalized problem the GPU path returns
     ``+inf`` with a zero eigenvector for each infinite eigenvalue.
+
+    Every GPU result is verified against ``(a, b)`` before it is returned:
+    each finite eigenpair must have a normwise backward error
+    ``‖Av - σBv‖ / ((‖A‖ + |σ|‖B‖) ‖v‖)`` of at most ``RESIDUAL_TOL``
+    (B = I for the standard problem). A result that fails raises
+    ``LinAlgError``, so "cupy" raises and "auto" falls back to SciPy.
+    The tolerance assumes double precision: float32 and complex64 input
+    stays in single precision on the GPU path and always fails the check,
+    so "cupy" raises for it and "auto" falls back to SciPy.
     """
     backend = resolve_backend(backend)
     if min_size is None:
