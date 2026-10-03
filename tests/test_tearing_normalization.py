@@ -94,3 +94,21 @@ def test_lambda_matches_the_closed_form_at_zero_sigma():
     )
 
     assert system.λ == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("normalized", [False, True],
+                         ids=["plain", "normalized"])
+def test_solve_returns_the_positive_frequency_member_of_the_pair(normalized):
+    """
+    The dominant mode is a conjugate pair whose real parts differ by
+    ~1e-16, so plain real-part order picked either member depending on
+    the LAPACK build. The tie rule in sorting_strategy makes it Im > 0.
+    """
+    _, solver = _solver(normalized=normalized)
+
+    σ0, _ = solver.solve(mode=0)
+    σ1, _ = solver.solve(mode=1)
+
+    assert σ0.imag > 0
+    np.testing.assert_allclose(σ0, _dominant(solver), rtol=1e-8)
+    np.testing.assert_allclose(σ1, np.conj(σ0), rtol=1e-8)

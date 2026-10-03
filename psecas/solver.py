@@ -1396,6 +1396,19 @@ class Solver:
     #: sorting_strategy() outright, when the default does not fit.
     sorting_cutoff = 10.0
 
+    #: Relative tolerance for recognising a complex-conjugate pair in the
+    #: default sorting_strategy: i and j are a pair when
+    #: |E[i] - conj(E[j])| <= sorting_tie_rtol * max(|E[i]|, |E[j]|).
+    #: The value is set by the dominant tearing pair at N=512, which matches
+    #: its conjugate only to 2e-8 relative: 1e-6 leaves a factor of 50.
+    #: Its limit: zggev does not enforce conjugate symmetry on the complex
+    #: matrices psecas builds, and at N=512 only 75-78 % of the tearing
+    #: eigenvalues have a numerical conjugate within 1e-6. Those that do
+    #: not stay in plain real-part order. The second tearing pair at N=512
+    #: (plain form) matches to only 7e-7, a margin of 1.4, so mode=2/3
+    #: there can still depend on the backend. Must lie in [0, 1).
+    sorting_tie_rtol = 1e-6
+
     def sorting_strategy(self, E):
         """
         A default sorting strategy.
@@ -1403,6 +1416,28 @@ class Solver:
         Eigenvalues whose real or imaginary part exceeds self.sorting_cutoff
         in magnitude are zeroed, and the result is sorted from largest to
         smallest real part.
+
+        The two members of a complex-conjugate pair have real parts that
+        agree only to rounding, so plain real-part order would put either
+        one first depending on the LAPACK build or backend. Each eigenvalue
+        is therefore paired, greedily in sorted order, with its nearest
+        unpaired numerical conjugate, |E[i] - conj(E[j])| <=
+        self.sorting_tie_rtol * max(|E[i]|, |E[j]|), and the member with
+        Im > 0 takes the earlier of the two slots the pair holds. Nothing
+        else moves. Two essentially real eigenvalues (|Im| <= rtol * |E|
+        for both, which includes the zeroed entries) are never paired.
+
+        One nondeterminism remains: a third eigenvalue whose real part falls
+        inside a pair's real-part gap (measured at 1e-16 to 6e-9) can still
+        swap slots with a member of the pair by rounding. For a well
+        separated growing mode that is rare. It is not rare when the real
+        parts themselves sit at rounding level, as in oscillatory or neutral
+        spectra, or in Hall MRI, where the cutoff zeros lie inside the gap:
+        each pair still comes out Im > 0 first, but which pair sits at a
+        given mode index stays rounding-dependent.
+
+        Exactly tied eigenvalues, such as the cutoff zeros, keep their input
+        order (the sort is stable); the old argsort()[::-1] reversed it.
 
         Returns (E, index) where E is a *copy* with the large values zeroed,
         and index orders it. Override this method for problems whose
@@ -1417,8 +1452,49 @@ class Solver:
         E[np.abs(E.real) > cutoff] = 0
         E[np.abs(E.imag) > cutoff] = 0
 
-        # Sort from largest to smallest eigenvalue
-        index = np.argsort(np.real(E))[::-1]
+        # Plain real-part order, largest first. A stable sort keeps exact
+        # ties (the zeroed entries, say) in input order.
+        index = np.argsort(-E.real, kind="stable")
+
+        rtol = self.sorting_tie_rtol
+        if not 0 <= rtol < 1:
+            raise ValueError(
+                "sorting_tie_rtol must lie in [0, 1), got {!r}.".format(rtol)
+            )
+        mod = np.abs(E)
+        real_like = np.abs(E.imag) <= rtol * mod
+        # -Re in slot order, ascending, for the candidate window.
+        key = -E.real[index]
+        paired = np.zeros(index.size, dtype=bool)   # by slot
+
+        for p in range(index.size):
+            if paired[p]:
+                continue
+            i = index[p]
+            # A zero (a cutoff entry) has tolerance zero and can never pair.
+            if not np.isfinite(E[i]) or mod[i] == 0:
+                continue
+            # |dRe| <= |E_i - conj(E_j)| <= rtol * max(|E_i|, |E_j|), and
+            # |E_j| <= |E_i| / (1 - rtol), which bounds the window.
+            w = rtol * mod[i] / (1.0 - rtol)
+            lo = np.searchsorted(key, key[p] - w, side="left")
+            hi = np.searchsorted(key, key[p] + w, side="right")
+            cand = index[lo:hi]
+            d = np.abs(E[i] - np.conj(E[cand]))
+            ok = ~paired[lo:hi]
+            ok[p - lo] = False
+            if real_like[i]:
+                ok &= ~real_like[cand]
+            ok &= d <= rtol * np.maximum(mod[i], mod[cand])
+            if not ok.any():
+                continue
+            # Nearest partner; argmin takes the lowest slot on a tie.
+            best = lo + int(np.argmin(np.where(ok, d, np.inf)))
+            paired[p] = paired[best] = True
+            first, second = min(p, best), max(p, best)
+            if E.imag[index[second]] > E.imag[index[first]]:
+                index[first], index[second] = index[second], index[first]
+
         return (E, index)
 
     def keep_result(self, sigma, vec, mode):
