@@ -109,7 +109,10 @@ def test_returned_eigenpair_satisfies_its_residual():
                 / (np.linalg.norm(A @ v) + abs(sigma) * np.linalg.norm(B @ v)))
 
     assert residual < 1e-8
-    assert solver.residual == pytest.approx(residual)
+    # solver.residual certifies the unpolished shift-invert pair; the
+    # returned pair is the polished one, whose residual is kept apart.
+    assert solver.polished_residual == pytest.approx(residual)
+    assert solver.residual <= 1e-6
 
 
 def test_unconverged_result_is_rejected_not_returned():

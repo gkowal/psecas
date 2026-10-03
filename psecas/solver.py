@@ -133,8 +133,8 @@ def _rayleigh_floor(A, B, σ, x, y):
         eps · |y|ᵀ(|A| + |σ||B|)|x| / |yᴴBx|,
 
     with |·| elementwise; B may be None, meaning the identity, for which
-    the second term is |σ|·|y|ᵀ|x|. The polish in Solver.solve() takes a
-    move of the eigenvalue within it as no evidence of an improvement.
+    the second term is |σ|·|y|ᵀ|x|. The polish (Solver._polish_pair) takes
+    a move of the eigenvalue within it as no evidence of an improvement.
     """
     ax, ay = np.abs(x), np.abs(y)
     Bx = x if B is None else B @ x
@@ -151,10 +151,18 @@ def _warn_polish(reason):
     # Keyed on the message without its parenthesized details, so that a
     # resolution sweep warns once per kind of failure, not once per solve
     # (as dense_eig._warn_fallback does).
+    #
+    # stacklevel=4 skips warn, this function and Solver._polish_pair, and
+    # names the caller of the method that called _polish_pair: of solve()
+    # or solve_mode(), both of which call _polish_pair directly. When
+    # solve_mode() is reached through another method (solve_with_guess(),
+    # or the guess path of iterate_solve_multimode()) the warning names
+    # that line in this module instead; no single level fits both a direct
+    # and a nested call.
     key = reason.split(" (")[0]
     if key not in _polish_warned:
         _polish_warned.add(key)
-        warnings.warn("Solver.solve() kept the unpolished eigenpair: "
+        warnings.warn("kept the unpolished eigenpair: "
                       + reason, RuntimeWarning, stacklevel=4)
 
 
@@ -280,8 +288,9 @@ class Solver:
     #: before the solve falls back to QZ.  QZ stays below about 1e-14 on the
     #: systems in the test suite and shift-invert below about 1e-11 where it
     #: works; where zgeev's balancing breaks it, the error is 1e-3 or more.
-    #: It is also the floor of the polish in solve(): a polished pair whose
-    #: normwise backward error exceeds it is refused.
+    #: It is also the floor of the polish (Solver._polish_pair, used by
+    #: solve() and solve_mode()): a polished pair whose normwise backward
+    #: error exceeds it is refused.
     GEVP_RESIDUAL_TOL = 1e-9
 
     def __init__(self, grid, system, do_gen_evp=False, gevp_method='qz',
@@ -551,7 +560,8 @@ class Solver:
             Refine the returned eigenvector with fixed-σ inverse iteration.
 
         residual_tol : float or None (default 1e-6)
-            Reject the result if the relative residual
+            Reject the result if the relative residual of the unpolished
+            pair (see the notes below)
 
                 ‖M₁v - σM₂v‖ / (‖M₁v‖ + |σ|‖M₂v‖)
 
@@ -565,6 +575,42 @@ class Solver:
         ShiftInvertError
             If the residual check fails.  The offending eigenvalue and
             residual are attached to the exception.
+
+        Notes
+        -----
+        After the shift-invert solve and the fixed-σ refinement of the
+        vector, the pair is polished as in solve(): self.polish_steps steps
+        of inverse iteration with a two-sided Rayleigh quotient, on dense
+        copies of M₁ and M₂ (M₂ = I for the standard EVP), under the same
+        guards and no-degrade rule (see solve() and _polish_pair()). There
+        is no spectrum here, so the nearer-eigenvalue guard is off
+        (others=None) and only the eigenvector overlap test,
+        POLISH_MIN_OVERLAP, keeps the polish on the same mode.
+        polish_steps = 0 turns the polish off and returns exactly the
+        unpolished pair.
+
+        The residual check comes first and judges the unpolished pair
+        that shift-invert and the refinement produced; only a pair that
+        passes it is polished. The check certifies that ARPACK converged
+        near the guess, and the verdict is the same with the polish on or
+        off. The polished pair's residual cannot serve as that
+        certificate: on ill-conditioned pencils it can exceed the
+        unpolished pair's, by 50-500x on tearing at N=128-512, even
+        though its σ is more accurate (at N=512 it crossed the default
+        residual_tol where the unpolished pair passed), and conversely the
+        polish can bring an unconverged pair far from the guess below the
+        tolerance. The polish has guards of its own (the overlap with the
+        certified vector, the no-degrade rule, the backward-error floor).
+        self.residual and the verbose output refer to the certified,
+        unpolished pair; self.polished_residual holds the residual of the
+        returned pair when it was polished, and NaN otherwise.
+        self.last_error_estimate is set to the polish's error estimate of
+        the returned σ, as in solve(); it is NaN when the polish is off or
+        refused, or when the residual check raises.
+
+        The polish changes what solve_mode() returns for every caller:
+        iterate_solve_multimode()'s guess path, and solve_with_guess() for
+        the generalized EVP, hence the guess path of iterate_solver().
         """
 
         def refine_eigenvector(A, σ, v, B=None, nsteps=10, rtol=1e-3):
@@ -599,6 +645,11 @@ class Solver:
             return v, ε
 
         sigma0 = complex(guess)
+
+        # Reset first, so that no estimate of an earlier solve survives
+        # this one, even should it raise.
+        self.last_error_estimate = np.nan
+        self.polished_residual = np.nan
 
         self.get_matrix1()
         A = self.mat1.tocsc()
@@ -680,6 +731,22 @@ class Solver:
                 .format(residual, residual_tol, σ, sigma0),
                 sigma=σ, residual=residual,
             )
+
+        # Polish the certified pair on the dense pencil, as solve() does.
+        # Not before the check: the polished pair's residual is no
+        # convergence certificate (see the notes in the docstring). No
+        # spectrum is at hand, so only the overlap guard protects the mode
+        # identity.
+        if self.polish_steps > 0 and np.isfinite(σ):
+            Ad = self.mat1.toarray()
+            Bd = self.mat2.toarray() if self.do_gen_evp else None
+            # Reset here too, in case _polish_pair is replaced by one that
+            # does not set it.
+            self._polish_error_estimate = np.nan
+            σ, v = self._polish_pair(Ad, Bd, σ, v, self.polish_steps,
+                                     others=None)
+            self.last_error_estimate = self._polish_error_estimate
+            self.polished_residual = _rel_residual(A, B, σ, v)
 
         return σ, v
 
@@ -1601,7 +1668,17 @@ class Solver:
         residual_tol (default 1e-6): relative-residual tolerance for the
         returned eigenpair. Raises ShiftInvertError if exceeded. Pass None
         to disable the check.
+
+        For the generalized EVP the pair comes from solve_mode(), which
+        polishes it, and self.system.result["error_estimate"] holds the
+        polish's error estimate (self.last_error_estimate), as after
+        solve(). The standard EVP is neither polished nor given an
+        estimate: self.last_error_estimate is NaN after it.
         """
+
+        # Reset first, so that no estimate of an earlier solve survives
+        # this one: the standard EVP below sets none.
+        self.last_error_estimate = np.nan
 
         # Calculate right-hand matrix
         self.get_matrix1()
@@ -1636,6 +1713,11 @@ class Solver:
             print("N:{}, only 1 eigenvalue:{}".format(self.grid.N, sigma))
 
         self.keep_result(sigma, v, mode)
+        if self.do_gen_evp:
+            # solve_mode() polished the pair; report its estimate as
+            # solve() does.
+            self.system.result.update(
+                {"error_estimate": self.last_error_estimate})
 
         return (sigma, v)
 
@@ -1743,17 +1825,18 @@ class Solver:
     sorting_tie_rtol = 1e-6
 
     #: Steps of inverse iteration with a two-sided Rayleigh quotient that
-    #: solve() spends polishing the selected eigenpair on the original
-    #: pencil (see solve()). Two steps take the dominant tearing eigenvalue
-    #: from 2e-7 (QZ) or 7e-6 (GPU reduction) relative error at N=512 to
-    #: 1e-9 or better, for about 0.5 s at n=2565 (1.3 s on one thread,
-    #: against 118 s for QZ). 0 turns the polish off: solve() then returns
-    #: exactly the unpolished pair of the dense solve.
+    #: the polish spends on an eigenpair on the original pencil: the
+    #: selected pair in solve() and the shift-invert pair in solve_mode()
+    #: (see solve()). Two steps take the dominant tearing eigenvalue from
+    #: 2e-7 (QZ) or 7e-6 (GPU reduction) relative error at N=512 to 1e-9
+    #: or better, for about 0.5 s at n=2565 (1.3 s on one thread, against
+    #: 118 s for QZ). 0 turns the polish off: both then return exactly
+    #: their unpolished result.
     polish_steps = 2
 
     #: Smallest overlap |v_oldᴴv_new| / (‖v_old‖‖v_new‖) between the
-    #: unpolished and the polished eigenvector for which solve() accepts
-    #: the polish; below it the iteration is taken to have moved to another
+    #: unpolished and the polished eigenvector for which the polish is
+    #: accepted; below it the iteration is taken to have moved to another
     #: mode, and the unpolished pair is kept. On tearing at N=128-512 and
     #: every test system 1 - overlap is at most 1.1e-7; a polish started
     #: between two well-separated modes lands on the other one with an
@@ -1761,7 +1844,7 @@ class Solver:
     POLISH_MIN_OVERLAP = 0.99
 
     #: Factor c on the step-to-step jitter |σ₂ - σ₁| in the no-degrade rule
-    #: of the polish: solve() keeps the unpolished eigenvalue σ₀ when the
+    #: of the polish: the unpolished eigenvalue σ₀ is kept when the
     #: polish moves it by at most max(c|σ₂ - σ₁|, floor) (see solve()).
     #: c = 4 is set by tearing at N=512, where the jitter is largest: in the
     #: study of the rule (1628 calls), c = 2 polished one start there that
