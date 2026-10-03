@@ -175,6 +175,30 @@ back to QZ with a `RuntimeWarning`. This happens when M₂'s entries span
 many decades, where the balancing inside the standard solver returns
 correct eigenvalues but meaningless eigenvectors.
 
+#### Eigenvalue polish
+
+At large resolution the dense solve loses accuracy on ill-conditioned
+problems, whichever backend runs it. On the tearing problem at N = 512 the
+dominant eigenvalue from QZ has a relative error of about 2e-7. `solve`,
+`solve_mode` and the tracked modes of `iterate_solve_multimode` therefore
+refine the eigenvalue they return with two steps of inverse iteration and a
+two-sided Rayleigh quotient on the original M₁ and M₂. At N = 512 this
+brings the relative error to about 1e-9.
+
+If the refinement moves σ by no more than its own estimated rounding floor,
+or by no more than a multiple of its step-to-step change, the original σ is
+kept unchanged. An already accurate eigenvalue, e.g. from the GPU solver, is
+therefore never made worse. The same threshold serves as an error estimate,
+stored in `solver.last_error_estimate` and `system.result["error_estimate"]`,
+and is NaN when there is none. It estimates the error of the eigenvalue of
+the discretized problem at that resolution, not the discretization error.
+
+Setting `solver.polish_steps = 0` turns the refinement off and returns
+exactly the unrefined results. The refinement costs two dense LU
+factorizations of the full matrix per refined eigenvalue. `solve_mode` still
+certifies the unrefined shift-invert result against `residual_tol` before
+refining it.
+
 #### GPU eigensolver
 
 The full dense solves (`solve`, `solve_full`, and the full solves inside the
