@@ -125,6 +125,21 @@ def _rel_residual(A, B, σ, v):
     return np.linalg.norm(Av - σ * Bv) / denom
 
 
+# Reasons for which a polish refusal has already been warned about.
+_polish_warned = set()
+
+
+def _warn_polish(reason):
+    # Keyed on the message without its parenthesized details, so that a
+    # resolution sweep warns once per kind of failure, not once per solve
+    # (as dense_eig._warn_fallback does).
+    key = reason.split(" (")[0]
+    if key not in _polish_warned:
+        _polish_warned.add(key)
+        warnings.warn("Solver.solve() kept the unpolished eigenpair: "
+                      + reason, RuntimeWarning, stacklevel=4)
+
+
 def _eig_shift_invert(A, B, shift, residual_tol):
     """
     All eigenpairs of the dense pencil (A, B) through the equivalent standard
@@ -247,6 +262,8 @@ class Solver:
     #: before the solve falls back to QZ.  QZ stays below about 1e-14 on the
     #: systems in the test suite and shift-invert below about 1e-11 where it
     #: works; where zgeev's balancing breaks it, the error is 1e-3 or more.
+    #: It is also the floor of the polish in solve(): a polished pair whose
+    #: normwise backward error exceeds it is refused.
     GEVP_RESIDUAL_TOL = 1e-9
 
     def __init__(self, grid, system, do_gen_evp=False, gevp_method='qz',
@@ -1163,6 +1180,122 @@ class Solver:
         return Σ_old[mode], V_old[:,mode], errors[mode]
 
 
+    def _polish_pair(self, A, B, σ, v, steps, others=None):
+        """
+        Refine the eigenpair (σ, v) of the dense pencil (A, B) by ``steps``
+        steps of inverse iteration with a two-sided Rayleigh quotient; B is
+        None for the identity. ``others`` holds the other finite
+        eigenvalues of the spectrum, for the same-mode test.
+
+        Returns the polished σ with the vector, of the input v and the
+        polished one, that has the smaller relative residual at that σ.
+        The polished vector is returned with unit 2-norm and phased so that
+        v_oldᴴv is real and positive; the input v is returned as it is.
+        When a guard refuses the result the input (σ, v) comes back
+        unchanged, with a one-time RuntimeWarning. See solve() for the
+        guards.
+        """
+        from scipy.linalg import LinAlgWarning
+
+        σ_old, v_old = σ, v
+        n = A.shape[0]
+
+        def B_dot(x):
+            return x if B is None else B @ x
+
+        def BH_dot(x):
+            return x if B is None else B.conj().T @ x
+
+        def step(s, x, y):
+            """One step from (s, x, y): the new triple, or (None, reason)."""
+            M = A - (s * np.eye(n) if B is None else s * B)
+            try:
+                lu = lu_factor(M, overwrite_a=True, check_finite=False)
+            except (np.linalg.LinAlgError, ValueError) as exc:
+                return None, ("the LU factorisation of A - σB failed ({})"
+                              .format(exc))
+            w = lu_solve(lu, B_dot(x), check_finite=False)
+            z = lu_solve(lu, BH_dot(x if y is None else y), trans=2,
+                         check_finite=False)
+            nw, nz = np.linalg.norm(w), np.linalg.norm(z)
+            if not (np.isfinite(nw) and np.isfinite(nz) and nw > 0
+                    and nz > 0):
+                return None, ("the inverse iteration gave a non-finite or "
+                              "zero vector")
+            x, y = w / nw, z / nz
+            Bx = B_dot(x)
+            num, den = np.vdot(y, A @ x), np.vdot(y, Bx)
+            if not (np.isfinite(num) and np.isfinite(den)) or \
+                    abs(den) <= np.finfo(float).eps * np.linalg.norm(Bx):
+                return None, ("the Rayleigh quotient is not finite or its "
+                              "denominator vanishes")
+            s = num / den
+            # Finite num and a nonzero den can still overflow.
+            if not np.isfinite(s):
+                return None, "the Rayleigh quotient overflowed"
+            return (s, x, y), None
+
+        s = complex(σ)
+        x = v / np.linalg.norm(v)
+        y = None
+        # inf * 0 and the like are expected for the results refused below.
+        with warnings.catch_warnings(), np.errstate(all="ignore"):
+            # A - sB is nearly singular by construction.
+            warnings.simplefilter("ignore", LinAlgWarning)
+            for k in range(steps):
+                result, reason = step(s, x, y)
+                if result is None:
+                    if k == 0:
+                        _warn_polish(reason)
+                        return σ_old, v_old
+                    # A later step failing (typically A - sB singular to
+                    # working precision) means s has converged: keep the
+                    # previous step's pair, which still faces the guards.
+                    break
+                s, x, y = result
+
+            # Same mode: the vector must not have turned to another mode...
+            c = np.vdot(v_old, x)
+            overlap = abs(c) / np.linalg.norm(v_old)
+            if not overlap >= self.POLISH_MIN_OVERLAP:
+                _warn_polish("the eigenvector overlap fell below "
+                             "POLISH_MIN_OVERLAP={} (overlap {:.3e}, "
+                             "sigma {})".format(self.POLISH_MIN_OVERLAP,
+                                                overlap, σ_old))
+                return σ_old, v_old
+            # ... nor the eigenvalue moved nearer to another one.
+            # Ties within a few ulp are accepted: a real eigenvalue that
+            # the dense solve split into a pair a ± iε is otherwise refused
+            # for one member and not the other, by rounding.
+            eps = np.finfo(float).eps
+            if others is not None and len(others) and \
+                    np.min(np.abs(np.asarray(others) - s)) * (1 + 4 * eps) \
+                    < abs(s - σ_old):
+                _warn_polish("the polished eigenvalue is nearer to another "
+                             "eigenvalue (sigma {} -> {})".format(σ_old, s))
+                return σ_old, v_old
+
+            # Return σ' with whichever vector has the smaller residual at
+            # σ': on ill-conditioned pencils the inverse-iteration vector
+            # can be less accurate than the dense solver's, although σ' is
+            # more accurate than σ.
+            if _rel_residual(A, B, s, x) < _rel_residual(A, B, s, v_old):
+                v_new = x * (np.conj(c) / abs(c))
+                v_new = v_new / np.linalg.norm(v_new)
+            else:
+                v_new = v_old
+
+            # Catastrophe floor, not an accuracy certificate.
+            be = dense_eig._backward_errors(A, B, np.array([s]),
+                                            v_new[:, None])[0]
+            if not be <= self.GEVP_RESIDUAL_TOL:
+                _warn_polish("the normwise backward error exceeds "
+                             "GEVP_RESIDUAL_TOL={} (error {:.1e}, sigma {})"
+                             .format(self.GEVP_RESIDUAL_TOL, be, σ_old))
+                return σ_old, v_old
+
+        return s, v_new
+
     def solve(self, useOPinv=_UNSET, verbose=False, mode=0, saveall=False):
         """
         Construct and solve the (generalized) eigenvalue problem (EVP)
@@ -1195,7 +1328,62 @@ class Solver:
         fastest and so on.
 
         saveall (default False): also store the full sorted spectrum in
-        self.E and the corresponding eigenvectors in self.v.
+        self.E and the corresponding eigenvectors in self.v. Only the slot
+        of the returned mode, self.E[mode] and self.v[:, mode], holds the
+        polished pair (see below); every other slot is the unpolished
+        result of the dense solve.
+
+        Polish
+
+        At large N the dense solve loses accuracy on ill-conditioned
+        pencils (fourth-derivative boundary rows give entries growing like
+        N⁸): on the tearing problem at N=512 the dominant eigenvalue is off
+        by 2e-7 relative with QZ and 7e-6 with the GPU reduction. The
+        selected eigenvalue is therefore refined on the original pencil by
+        self.polish_steps steps (default 2) of inverse iteration,
+
+            w = (M₁ - σM₂)⁻¹ M₂ v,   v = w / ‖w‖,
+
+        each followed by a two-sided Rayleigh quotient σ = (yᴴM₁v)/(yᴴM₂v),
+        with the left vector y from the same LU factorisation. This brings
+        the tearing eigenvalues to about 1e-9 relative or better for O(n²)
+        work per step after one O(n³) LU, small next to the eigensolve.
+        polish_steps = 0 turns the polish off and returns exactly the
+        unpolished pair.
+
+        The polished eigenvalue σ' is returned with whichever of the
+        unpolished vector v₀ and the polished vector v' has the smaller
+        relative residual ‖M₁v - σ'M₂v‖ / (‖M₁v‖ + |σ'|‖M₂v‖). On
+        ill-conditioned pencils such as tearing at N >= 256 that is usually
+        v₀: inverse iteration on the unbalanced pencil improves σ but not
+        the vector. v' is returned with unit 2-norm and rotated by a unit
+        phase so that v₀ᴴv' is real and positive; v₀ is returned as the
+        dense solve gave it. The returned pair's residual can be larger
+        than the unpolished pair's even though σ' is more accurate: on
+        ill-conditioned pencils the residual is dominated by the vector's
+        error amplified by ‖M₁ - σM₂‖, so a residual check against the
+        unpolished pair is not evidence that the polish made things worse.
+
+        Any such failure in a later step, typically an LU singular to
+        working precision because σ has converged, keeps the pair of the
+        previous step, which goes on to the guards below without a warning.
+
+        A mode whose eigenvalue the sort changed (zeroed by
+        sorting_cutoff) or that is not finite is never polished. The
+        polish is refused, keeping the unpolished pair with a
+        RuntimeWarning issued once per kind of failure, when the first
+        step fails: the LU raises, the vector is non-finite or zero, or the
+        Rayleigh quotient is not finite or its denominator vanishes; when the overlap |v₀ᴴv'| / (‖v₀‖‖v'‖) falls below
+        self.POLISH_MIN_OVERLAP, meaning the iteration moved to another
+        mode (this is the same-mode protection); when σ' lies nearer to
+        another finite eigenvalue of the dense solve than to the unpolished
+        one; or when the normwise backward error of the returned pair,
+        ‖M₁v - σ'M₂v‖ / ((‖M₁‖_F + |σ'|‖M₂‖_F)‖v‖), exceeds
+        self.GEVP_RESIDUAL_TOL. That last test is a floor against a
+        catastrophic failure, not a certificate of accuracy. The record of
+        warnings already issued is process-wide, as in psecas.dense_eig:
+        each kind of refusal warns once per Python process, whichever
+        solver triggers it.
         """
 
         if useOPinv is not _UNSET:
@@ -1212,19 +1400,41 @@ class Solver:
         if self.do_gen_evp:
             self.get_matrix2()
 
-        E, V = self._eig_dense()
+        E_raw, V = self._eig_dense()
 
-        # Sort the eigenvalues
-        E, index = self.sorting_strategy(E)
+        # Sort the eigenvalues. A copy, because an overriding
+        # sorting_strategy may change its argument in place, and E_raw must
+        # stay the dense solve's own values for the polish test below.
+        E, index = self.sorting_strategy(E_raw.copy())
 
         # Choose the eigenvalue mode value only
-        sigma = E[index[mode]]
-        v = V[:, index[mode]]
+        i = index[mode]
+        sigma = E[i]
+        v = V[:, i]
+
+        # Polish the selected pair on the original pencil, unless the sort
+        # changed its value (a cutoff zero, say) or it is not finite.
+        polished = False
+        if (self.polish_steps > 0 and np.isfinite(E_raw[i])
+                and E[i] == E_raw[i]):
+            A = self.mat1.toarray()
+            B = self.mat2.toarray() if self.do_gen_evp else None
+            others = np.delete(E_raw, i)
+            others = others[np.isfinite(others)]
+            sigma, v = self._polish_pair(A, B, E_raw[i], V[:, i],
+                                         self.polish_steps, others=others)
+            polished = True
 
         # Save all eigenvalues and eigenvectors here
         if saveall:
             self.E = E[index]
             self.v = V[:, index]
+            if polished:
+                # Only the selected mode's slot holds the polished pair.
+                self.E = self.E.astype(np.result_type(self.E, sigma),
+                                       copy=False)
+                self.E[mode] = sigma
+                self.v[:, mode] = v
         if verbose:
             print("N: {}, all eigenvalues: {}".format(self.grid.N, sigma))
 
@@ -1408,6 +1618,24 @@ class Solver:
     #: (plain form) matches to only 7e-7, a margin of 1.4, so mode=2/3
     #: there can still depend on the backend. Must lie in [0, 1).
     sorting_tie_rtol = 1e-6
+
+    #: Steps of inverse iteration with a two-sided Rayleigh quotient that
+    #: solve() spends polishing the selected eigenpair on the original
+    #: pencil (see solve()). Two steps take the dominant tearing eigenvalue
+    #: from 2e-7 (QZ) or 7e-6 (GPU reduction) relative error at N=512 to
+    #: 1e-9 or better, for about 0.5 s at n=2565 (1.3 s on one thread,
+    #: against 118 s for QZ). 0 turns the polish off: solve() then returns
+    #: exactly the unpolished pair of the dense solve.
+    polish_steps = 2
+
+    #: Smallest overlap |v_oldᴴv_new| / (‖v_old‖‖v_new‖) between the
+    #: unpolished and the polished eigenvector for which solve() accepts
+    #: the polish; below it the iteration is taken to have moved to another
+    #: mode, and the unpolished pair is kept. On tearing at N=128-512 and
+    #: every test system 1 - overlap is at most 1.1e-7; a polish started
+    #: between two well-separated modes lands on the other one with an
+    #: overlap far below 0.99 (0.29 in tests/test_polish.py).
+    POLISH_MIN_OVERLAP = 0.99
 
     def sorting_strategy(self, E):
         """
