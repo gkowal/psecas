@@ -125,6 +125,24 @@ def _rel_residual(A, B, σ, v):
     return np.linalg.norm(Av - σ * Bv) / denom
 
 
+def _rayleigh_floor(A, B, σ, x, y):
+    """
+    Rounding bound of the two-sided Rayleigh quotient yᴴAx / yᴴBx
+    evaluated in double precision at the eigenvalue σ:
+
+        eps · |y|ᵀ(|A| + |σ||B|)|x| / |yᴴBx|,
+
+    with |·| elementwise; B may be None, meaning the identity, for which
+    the second term is |σ|·|y|ᵀ|x|. The polish in Solver.solve() takes a
+    move of the eigenvalue within it as no evidence of an improvement.
+    """
+    ax, ay = np.abs(x), np.abs(y)
+    Bx = x if B is None else B @ x
+    num = ay @ (np.abs(A) @ ax)
+    num += abs(σ) * (ay @ ax if B is None else ay @ (np.abs(B) @ ax))
+    return np.finfo(float).eps * num / abs(np.vdot(y, Bx))
+
+
 # Reasons for which a polish refusal has already been warned about.
 _polish_warned = set()
 
@@ -1187,13 +1205,16 @@ class Solver:
         None for the identity. ``others`` holds the other finite
         eigenvalues of the spectrum, for the same-mode test.
 
-        Returns the polished σ with the vector, of the input v and the
-        polished one, that has the smaller relative residual at that σ.
-        The polished vector is returned with unit 2-norm and phased so that
-        v_oldᴴv is real and positive; the input v is returned as it is.
-        When a guard refuses the result the input (σ, v) comes back
-        unchanged, with a one-time RuntimeWarning. See solve() for the
-        guards.
+        Returns the polished σ', or the input σ itself when the move to σ'
+        lies within max(POLISH_JITTER_FACTOR·|σ₂ - σ₁|, floor) (the
+        no-degrade rule; see solve()), with the vector, of the input v and
+        the polished one, that has the smaller relative residual at the
+        returned σ. The polished vector is returned with unit 2-norm and
+        phased so that v_oldᴴv is real and positive; the input v is
+        returned as it is. When a guard refuses the result the input
+        (σ, v) comes back unchanged, with a one-time RuntimeWarning; keeping
+        σ by the no-degrade rule is not a refusal and does not warn. See
+        solve() for the guards.
         """
         from scipy.linalg import LinAlgWarning
 
@@ -1238,6 +1259,8 @@ class Solver:
         s = complex(σ)
         x = v / np.linalg.norm(v)
         y = None
+        # The Rayleigh quotient of every step that succeeded.
+        quotients = []
         # inf * 0 and the like are expected for the results refused below.
         with warnings.catch_warnings(), np.errstate(all="ignore"):
             # A - sB is nearly singular by construction.
@@ -1253,6 +1276,7 @@ class Solver:
                     # previous step's pair, which still faces the guards.
                     break
                 s, x, y = result
+                quotients.append(s)
 
             # Same mode: the vector must not have turned to another mode...
             c = np.vdot(v_old, x)
@@ -1275,18 +1299,34 @@ class Solver:
                              "eigenvalue (sigma {} -> {})".format(σ_old, s))
                 return σ_old, v_old
 
-            # Return σ' with whichever vector has the smaller residual at
-            # σ': on ill-conditioned pencils the inverse-iteration vector
-            # can be less accurate than the dense solver's, although σ' is
-            # more accurate than σ.
-            if _rel_residual(A, B, s, x) < _rel_residual(A, B, s, v_old):
+            # No degrade: a move within the rounding floor of the last
+            # Rayleigh quotient, or within the step-to-step jitter, is no
+            # evidence that σ' is better than σ₀, which is then kept as
+            # it came. A success, not a refusal: no warning.
+            floor = _rayleigh_floor(A, B, s, x, y)
+            jitter = (abs(quotients[-1] - quotients[-2])
+                      if len(quotients) >= 2 else 0.0)
+            keep = abs(s - σ_old) <= max(self.POLISH_JITTER_FACTOR * jitter,
+                                         floor)
+            σ_new = σ_old if keep else s
+
+            # Return σ_new with whichever vector has the smaller residual
+            # at σ_new: on ill-conditioned pencils the inverse-iteration
+            # vector can be less accurate than the dense solver's, although
+            # σ' is more accurate than σ.
+            if _rel_residual(A, B, σ_new, x) < \
+                    _rel_residual(A, B, σ_new, v_old):
                 v_new = x * (np.conj(c) / abs(c))
                 v_new = v_new / np.linalg.norm(v_new)
             else:
                 v_new = v_old
 
-            # Catastrophe floor, not an accuracy certificate.
-            be = dense_eig._backward_errors(A, B, np.array([s]),
+            # Catastrophe floor, not an accuracy certificate. Not applied
+            # to the unpolished pair coming back unchanged: the polish did
+            # not produce it, and keeping it is no refusal to warn about.
+            if keep and v_new is v_old:
+                return σ_new, v_new
+            be = dense_eig._backward_errors(A, B, np.array([σ_new]),
                                             v_new[:, None])[0]
             if not be <= self.GEVP_RESIDUAL_TOL:
                 _warn_polish("the normwise backward error exceeds "
@@ -1294,7 +1334,7 @@ class Solver:
                              .format(self.GEVP_RESIDUAL_TOL, be, σ_old))
                 return σ_old, v_old
 
-        return s, v_new
+        return σ_new, v_new
 
     def solve(self, useOPinv=_UNSET, verbose=False, mode=0, saveall=False):
         """
@@ -1351,9 +1391,42 @@ class Solver:
         polish_steps = 0 turns the polish off and returns exactly the
         unpolished pair.
 
-        The polished eigenvalue σ' is returned with whichever of the
+        The polish has an accuracy floor of its own, reached from any
+        start: on the wells and on tearing at N=128 it is the rounding of
+        the Rayleigh quotient evaluated in double precision, at tearing
+        N=512 the error of the LU vectors. A start more accurate than the
+        floor would come back degraded (the GPU's eigenvalue of the
+        standard well at N=256, 3.2e-14 off, came back 4.3e-13 off). So
+        the unpolished eigenvalue σ₀ is
+        kept, bit for bit and without a warning, when
+
+            |σ' - σ₀| <= max(self.POLISH_JITTER_FACTOR·|σ₂ - σ₁|, floor),
+            floor = eps·|y|ᵀ(|M₁| + |σ'||M₂|)|x| / |yᴴM₂x|,
+
+        with x, y the unit right and left vectors of the last step that
+        succeeded, σ' its Rayleigh quotient, σ₁ and σ₂ the quotients of the
+        first two steps (of the last two, should polish_steps exceed 2; the
+        jitter term is 0 unless two steps succeeded) and |·| elementwise;
+        M₂ = I for the standard EVP. Otherwise σ' is
+        returned. Either way max(4|σ₂ - σ₁|, floor) estimates the error of
+        the polished value. Measured on the study of this rule, the error
+        of the returned eigenvalue was at most 1.275·max(4|σ₂ - σ₁|, floor)
+        in 1628 calls on 11 pencils (wells, standard and generalized, at
+        N=64-512, and tearing at N=128-512, from dense-solve, exact and
+        perturbed starts). That bound is empirical, not a guarantee. The
+        rule never degraded a start there, at a price: within the
+        threshold it trades forgone improvement for never degrading,
+        keeping starts that the polish would have improved (236 of the 1628
+        calls, by up to 74x: tearing at N=256, a start 1e-10 off kept where
+        the polish reached 1.4e-12); the returned error still satisfies the
+        bound above. All of this was measured with two successful steps:
+        with polish_steps = 1, or when the second step fails, the jitter
+        term is 0 and the test rests on the floor alone, which in the study
+        let wrong polishes through at tearing N=512.
+
+        The returned eigenvalue σ (σ' or σ₀) comes with whichever of the
         unpolished vector v₀ and the polished vector v' has the smaller
-        relative residual ‖M₁v - σ'M₂v‖ / (‖M₁v‖ + |σ'|‖M₂v‖). On
+        relative residual ‖M₁v - σM₂v‖ / (‖M₁v‖ + |σ|‖M₂v‖). On
         ill-conditioned pencils such as tearing at N >= 256 that is usually
         v₀: inverse iteration on the unbalanced pencil improves σ but not
         the vector. v' is returned with unit 2-norm and rotated by a unit
@@ -1373,14 +1446,18 @@ class Solver:
         polish is refused, keeping the unpolished pair with a
         RuntimeWarning issued once per kind of failure, when the first
         step fails: the LU raises, the vector is non-finite or zero, or the
-        Rayleigh quotient is not finite or its denominator vanishes; when the overlap |v₀ᴴv'| / (‖v₀‖‖v'‖) falls below
+        Rayleigh quotient is not finite or its denominator vanishes; when
+        the overlap |v₀ᴴv'| / (‖v₀‖‖v'‖) falls below
         self.POLISH_MIN_OVERLAP, meaning the iteration moved to another
         mode (this is the same-mode protection); when σ' lies nearer to
         another finite eigenvalue of the dense solve than to the unpolished
-        one; or when the normwise backward error of the returned pair,
-        ‖M₁v - σ'M₂v‖ / ((‖M₁‖_F + |σ'|‖M₂‖_F)‖v‖), exceeds
+        one; or when the normwise backward error of the pair to be
+        returned (σ' or the kept σ₀, with the vector chosen above),
+        ‖M₁v - σM₂v‖ / ((‖M₁‖_F + |σ|‖M₂‖_F)‖v‖), exceeds
         self.GEVP_RESIDUAL_TOL. That last test is a floor against a
-        catastrophic failure, not a certificate of accuracy. The record of
+        catastrophic failure, not a certificate of accuracy, and is skipped
+        when the pair to be returned is the unpolished one (σ₀ kept and v₀
+        chosen), which the polish did not produce. The record of
         warnings already issued is process-wide, as in psecas.dense_eig:
         each kind of refusal warns once per Python process, whichever
         solver triggers it.
@@ -1636,6 +1713,19 @@ class Solver:
     #: between two well-separated modes lands on the other one with an
     #: overlap far below 0.99 (0.29 in tests/test_polish.py).
     POLISH_MIN_OVERLAP = 0.99
+
+    #: Factor c on the step-to-step jitter |σ₂ - σ₁| in the no-degrade rule
+    #: of the polish: solve() keeps the unpolished eigenvalue σ₀ when the
+    #: polish moves it by at most max(c|σ₂ - σ₁|, floor) (see solve()).
+    #: c = 4 is set by tearing at N=512, where the jitter is largest: in the
+    #: study of the rule (1628 calls), c = 2 polished one start there that
+    #: should have been kept (mode 2, 1e-13 off, returned 4.7e-10 off) and
+    #: c = 4 none. The QZ starts there, 2e-7 off, are polished with either.
+    #: The price of never degrading: within the threshold the rule also
+    #: keeps starts the polish would have improved, by up to 74x in that
+    #: study (236 of 1628 calls), with the returned error still at most
+    #: 1.275·max(4|σ₂ - σ₁|, floor).
+    POLISH_JITTER_FACTOR = 4
 
     def sorting_strategy(self, E):
         """
