@@ -23,17 +23,19 @@ def _clean_warnings(monkeypatch):
     monkeypatch.setattr(solver_mod, "_polish_warned", set())
 
 
-def _well_solver(N, do_gen_evp=True):
+def _well_solver(N, do_gen_evp=True, backend="auto"):
     """Infinite well, E_n = -n²π²/2. With do_gen_evp=True Psecas solves a
     generalized EVP whose B has zero rows at the two Dirichlet boundaries;
-    with False it trims the boundaries and solves a standard EVP."""
+    with False it trims the boundaries and solves a standard EVP. Tests
+    whose premise is QZ's error pass backend="scipy": the GPU path can
+    start closer to the exact value than the polish's own floor."""
     grid = ChebyshevExtremaGrid(N=N, zmin=0, zmax=1, z='x')
     system = System(grid, variables='phi', eigenvalue='E')
     if do_gen_evp:
         system.add_equation("-E*phi = -1/2*dx(dx(phi))", boundary=True)
     else:
         system.add_equation("E*phi = 1/2*dx(dx(phi))", boundary=True)
-    solver = Solver(grid, system, do_gen_evp=do_gen_evp)
+    solver = Solver(grid, system, do_gen_evp=do_gen_evp, backend=backend)
     assert solver.do_gen_evp == do_gen_evp
     solver.sorting_strategy = lambda E: (E, np.argsort(np.abs(E)))
     return solver
@@ -67,7 +69,7 @@ def _pencil(solver):
 def test_polish_reaches_the_exact_well_eigenvalue():
     """QZ is 4e-10 off -π²/2 at N=256; two polish steps reach 4e-13."""
     exact = -np.pi ** 2 / 2
-    solver = _well_solver(256)
+    solver = _well_solver(256, backend="scipy")
     σ, _ = solver.solve(mode=0)
     assert abs(σ - exact) <= 1e-11 * abs(exact)
 
@@ -180,7 +182,7 @@ def test_standard_evp_is_polished_with_identity_b(monkeypatch):
     """The standard EVP (boundaries trimmed, B = None). At N=256 QZ is
     2.4e-12 off -π²/2 and two polish steps reach 4e-14."""
     exact = -np.pi ** 2 / 2
-    solver = _well_solver(256, do_gen_evp=False)
+    solver = _well_solver(256, do_gen_evp=False, backend="scipy")
     seen = []
     polish = Solver._polish_pair
 
