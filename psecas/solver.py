@@ -153,12 +153,12 @@ def _warn_polish(reason):
     # (as dense_eig._warn_fallback does).
     #
     # stacklevel=4 skips warn, this function and Solver._polish_pair, and
-    # names the caller of the method that called _polish_pair: of solve()
-    # or solve_mode(), both of which call _polish_pair directly. When
-    # solve_mode() is reached through another method (solve_with_guess(),
-    # or the guess path of iterate_solve_multimode()) the warning names
-    # that line in this module instead; no single level fits both a direct
-    # and a nested call.
+    # names the caller of the method that called _polish_pair: of solve(),
+    # solve_mode() or iterate_solve_multimode(), all three of which call
+    # _polish_pair directly. When one of them is reached through another
+    # (solve_mode() from solve_with_guess() or from the driver's guess
+    # path) the warning names that line in this module instead; no single
+    # level fits both a direct and a nested call.
     key = reason.split(" (")[0]
     if key not in _polish_warned:
         _polish_warned.add(key)
@@ -289,8 +289,8 @@ class Solver:
     #: systems in the test suite and shift-invert below about 1e-11 where it
     #: works; where zgeev's balancing breaks it, the error is 1e-3 or more.
     #: It is also the floor of the polish (Solver._polish_pair, used by
-    #: solve() and solve_mode()): a polished pair whose normwise backward
-    #: error exceeds it is refused.
+    #: solve(), solve_mode() and iterate_solve_multimode()): a polished
+    #: pair whose normwise backward error exceeds it is refused.
     GEVP_RESIDUAL_TOL = 1e-9
 
     def __init__(self, grid, system, do_gen_evp=False, gevp_method='qz',
@@ -1054,6 +1054,33 @@ class Solver:
 
         error : float
             Final convergence error estimate for the selected mode.
+
+        Notes
+        -----
+        The tracked modes are polished as in solve() (self.polish_steps
+        steps of inverse iteration with a two-sided Rayleigh quotient, on
+        the dense pencil). After every full solve past Ns[0], the first
+        ``modes`` modes in the driver's order are polished, each with the
+        rest of the full solve's finite spectrum for the nearer-eigenvalue
+        guard, and their errors are then recomputed and the modes
+        reordered, so that the convergence test sees the polished values;
+        should the new order bring an unpolished mode into the first
+        ``modes``, it is polished in turn, until all of them are. On the
+        guess path, solve_mode() polishes each mode itself. Ns[0] is not
+        polished (nothing is tracked yet, and the kept set can be large),
+        so the first comparison is of unpolished values against polished
+        ones, at a dense error of about 1e-14 at small N. polish_steps = 0
+        turns the polish off and reproduces the unpolished driver exactly.
+
+        The polish costs two dense LU factorisations (one per step at the
+        default polish_steps = 2) per tracked mode per full-solve
+        resolution. With allmodes=True and maxmode=None every filtered
+        mode is tracked, so set maxmode to bound the cost.
+
+        On return, self.last_error_estimate and
+        self.system.result["error_estimate"] hold the polish's error
+        estimate of the returned (selected) eigenvalue when it was polished
+        at the returned resolution, and NaN otherwise.
         """
 
         def _print_modes(Σ, N, errors=None, case=None, delta=None, error=None):
@@ -1154,12 +1181,19 @@ class Solver:
                 "Ns, got an empty sequence."
             )
 
+        # Reset first, so that no estimate of an earlier solve survives
+        # this one, even should it raise.
+        self.last_error_estimate = np.nan
+
         self.grid.N = Ns[0]
         Σ, V = self.solve_full()
         Σ_old, V_old = self.filter_modes(
             Σ, V, re_range=re_range, im_range=im_range,
             require_re_positive=require_re_positive)
         grid_old = copy.deepcopy(self.grid)
+        # Polish error estimates aligned with Σ_old; NaN for a mode that
+        # was not polished at its resolution (Ns[0] never is).
+        est_old = np.full(Σ_old.size, np.nan)
         if verbose:
             if orderby in ['real_part', 'real']:
                 index = np.argsort(Σ_old.real)[::-1]
@@ -1185,14 +1219,20 @@ class Solver:
 
         for N in Ns[1:]:
             self.grid.N = N
+            # Whether Σ, V come from a full solve (polished below), and
+            # the polish estimates of the guess path, aligned with Σ.
+            full = True
+            est = None
             if delta > gtol:
                 case = ''
                 Σ, V = self.solve_full()
             else:
                 case = ' [with guess]'
+                full = False
                 try:
                     Σ = []
                     V = []
+                    est = []
                     for i in range(modes):
                         σ0 = Σ_old[i]
                         if useEVguess:
@@ -1204,6 +1244,7 @@ class Solver:
                                                 residual_tol=residual_tol)
                         Σ.append(σ)
                         V.append(v)
+                        est.append(self.last_error_estimate)
                     Σ = np.array(Σ)
                     V = np.array(V).T
                 except ShiftInvertError:
@@ -1214,25 +1255,85 @@ class Solver:
                     # since the rejected result tends to sit near the guess
                     # it was given.
                     case = ' [guess rejected → full]'
+                    full = True
                     Σ, V = self.solve_full()
 
             try:
                 Σ_new, V_new = self.filter_modes(
                     Σ, V, re_range=re_range, im_range=im_range,
                     require_re_positive=require_re_positive)
+                if full:
+                    est_new = np.full(Σ_new.size, np.nan)
+                else:
+                    # The same filter, applied to the estimates as a row.
+                    _, est_new = self.filter_modes(
+                        Σ, np.array(est, dtype=float)[None, :],
+                        re_range=re_range, im_range=im_range,
+                        require_re_positive=require_re_positive)
+                    est_new = est_new[0]
             except ValueError:
                 # Fast solver found no eigenmodes in the specified range.
                 # Fall back to full solve to recover the spectrum.
                 case = ' [guess failed → full]'
+                full = True
                 Σ, V = self.solve_full()
                 Σ_new, V_new = self.filter_modes(
                     Σ, V, re_range=re_range, im_range=im_range,
                     require_re_positive=require_re_positive)
+                est_new = np.full(Σ_new.size, np.nan)
 
             errors, deltas, index = _errors(Σ_new, Σ_old, rtol=rtol, atol=atol, metric=metric, orderby=orderby)
 
             Σ_new = Σ_new[index]
             V_new = V_new[:,index]
+            est_new = est_new[index]
+
+            if full and self.polish_steps > 0:
+                # Polish the tracked modes of this full solve on the dense
+                # pencil, as solve() does, then measure their errors anew
+                # so that the ordering and the convergence test see the
+                # polished values. The polish can reorder the modes and
+                # bring an unpolished one into the tracked set (the
+                # unpolished member of a conjugate pair, say), so repeat
+                # until every tracked mode has been polished. Each mode is
+                # polished at most once, which bounds the loop. _select
+                # depends on the number of modes only, which the polish
+                # does not change.
+                _, modes = _select(Σ_new.size, maxmode, allmodes)
+                A = self.mat1.toarray()
+                B = self.mat2.toarray() if self.do_gen_evp else None
+                Σ_all = np.asarray(Σ).reshape(-1)
+                finite = np.isfinite(Σ_all)
+                Σ_new = Σ_new.astype(complex)
+                V_new = V_new.astype(np.result_type(V_new, complex))
+                # Which modes have been polished, carried through every
+                # reordering with the modes themselves.
+                polished = np.zeros(Σ_new.size, dtype=bool)
+                while not polished[:modes].all():
+                    for i in np.flatnonzero(~polished[:modes]):
+                        polished[i] = True
+                        σ0 = Σ_new[i]
+                        # The rest of the unfiltered spectrum: drop the
+                        # polished value itself, once.
+                        keep = finite.copy()
+                        hit = np.flatnonzero(finite & (Σ_all == σ0))
+                        if hit.size:
+                            keep[hit[0]] = False
+                        others = Σ_all[keep]
+                        self._polish_error_estimate = np.nan
+                        σ, v = self._polish_pair(A, B, σ0, V_new[:, i],
+                                                 self.polish_steps,
+                                                 others=others)
+                        Σ_new[i] = σ
+                        V_new[:, i] = v
+                        est_new[i] = self._polish_error_estimate
+
+                    errors, deltas, index = _errors(Σ_new, Σ_old, rtol=rtol, atol=atol, metric=metric, orderby=orderby)
+
+                    Σ_new = Σ_new[index]
+                    V_new = V_new[:,index]
+                    est_new = est_new[index]
+                    polished = polished[index]
 
             if plots:
                 _plot(Σ_new, errors=errors)
@@ -1249,21 +1350,28 @@ class Solver:
                 converged = True
                 if not allgrids:
                     self.keep_result(Σ_new[mode], V_new[:,mode], mode)
+                    self.last_error_estimate = float(est_new[mode])
                     self.system.result.update({"converged": True})
                     self.system.result.update({"error": error})
                     self.system.result.update({"grid": self.grid.zg})
+                    self.system.result.update(
+                        {"error_estimate": self.last_error_estimate})
                     if allmodes:
                         return Σ_new[:modes], V_new[:, :modes], errors[:modes]
                     return Σ_new[mode], V_new[:,mode], errors[mode]
 
             Σ_old = Σ_new.copy()
             V_old = V_new.copy()
+            est_old = est_new.copy()
             grid_old = copy.deepcopy(self.grid)
 
         self.keep_result(Σ_old[mode], V_old[:,mode], mode)
+        self.last_error_estimate = float(est_old[mode])
         self.system.result.update({"converged": converged})
         self.system.result.update({"error": error})
         self.system.result.update({"grid": self.grid.zg})
+        self.system.result.update(
+            {"error_estimate": self.last_error_estimate})
 
         if allmodes:
             return Σ_old[:modes], V_old[:, :modes], errors[:modes]
@@ -1826,12 +1934,13 @@ class Solver:
 
     #: Steps of inverse iteration with a two-sided Rayleigh quotient that
     #: the polish spends on an eigenpair on the original pencil: the
-    #: selected pair in solve() and the shift-invert pair in solve_mode()
-    #: (see solve()). Two steps take the dominant tearing eigenvalue from
-    #: 2e-7 (QZ) or 7e-6 (GPU reduction) relative error at N=512 to 1e-9
-    #: or better, for about 0.5 s at n=2565 (1.3 s on one thread, against
-    #: 118 s for QZ). 0 turns the polish off: both then return exactly
-    #: their unpolished result.
+    #: selected pair in solve(), the shift-invert pair in solve_mode(),
+    #: the tracked modes in iterate_solve_multimode() (see solve()). Two
+    #: steps take the dominant tearing eigenvalue from 2e-7 (QZ) or 7e-6
+    #: (GPU reduction) relative error at N=512 to 1e-9 or better, for about
+    #: 0.5 s at n=2565 (1.3 s on one thread, against 118 s for QZ). 0 turns
+    #: the polish off: each of the three then returns exactly its
+    #: unpolished result.
     polish_steps = 2
 
     #: Smallest overlap |v_oldᴴv_new| / (‖v_old‖‖v_new‖) between the
