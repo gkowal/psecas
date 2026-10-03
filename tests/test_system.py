@@ -98,7 +98,7 @@ def test_boundary_expression_with_a_nonzero_rhs_is_reported(grid):
 
 
 @pytest.mark.parametrize("name", ["mode", "converged", "error", "grid",
-                                  "r_err", "a_err"])
+                                  "r_err", "a_err", "error_estimate"])
 def test_variable_named_like_solver_metadata_is_refused(grid, name):
     """
     Eigenmode profiles and solver metadata share one dict, so a variable

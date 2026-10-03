@@ -91,6 +91,35 @@ def test_polish_reaches_the_exact_well_eigenvalue():
     assert abs(σ0 - exact) > 1e-10 * abs(exact)
 
 
+def test_error_estimate_bounds_the_well_error():
+    """The error estimate T = max(4|σ₂ - σ₁|, floor) of the polished well
+    eigenvalue at N=256 bounds its error by the study's 1.275·T, and is
+    not vacuous: T is 17 times the error (3.5e-11 against 2.1e-12), so
+    100 times leaves a wide margin. The exact value stands in for the
+    pencil's eigenvalue, from which it differs by far less than T."""
+    exact = -np.pi ** 2 / 2
+    solver = _well_solver(256, backend="scipy")
+    assert np.isnan(solver.last_error_estimate)
+    σ, _ = solver.solve(mode=0)
+    T = solver.last_error_estimate
+    assert solver.system.result["error_estimate"] == T
+    err = abs(σ - exact)
+    assert np.isfinite(T)
+    assert err <= 1.275 * T
+    assert T <= 100 * err
+
+
+def test_error_estimate_does_not_outlive_its_solve():
+    """A polished solve followed by an unpolished one leaves NaN."""
+    solver = _well_solver(64)
+    solver.solve(mode=0)
+    assert np.isfinite(solver.last_error_estimate)
+    solver.polish_steps = 0
+    solver.solve(mode=0)
+    assert np.isnan(solver.last_error_estimate)
+    assert np.isnan(solver.system.result["error_estimate"])
+
+
 @pytest.mark.parametrize("make", [lambda: _well_solver(64),
                                   lambda: _well_solver(64, do_gen_evp=False),
                                   _tearing_solver],
@@ -106,6 +135,8 @@ def test_zero_steps_is_the_unpolished_path_exactly(make):
         np.testing.assert_array_equal(solver.E, E_ref)
         np.testing.assert_array_equal(solver.v, V_ref)
         assert solver.system.result[solver.system.eigenvalue] == σ_ref
+        assert np.isnan(solver.last_error_estimate)
+        assert np.isnan(solver.system.result["error_estimate"])
 
 
 def test_saveall_polishes_only_the_selected_slot(monkeypatch):
@@ -142,6 +173,7 @@ def test_zeroed_mode_is_not_polished(monkeypatch):
     assert σ == 0 and σ_ref == 0
     np.testing.assert_array_equal(v, v_ref)
     assert not called
+    assert np.isnan(solver.last_error_estimate)
 
 
 def test_mode_changed_in_place_by_the_sort_is_not_polished():
@@ -157,6 +189,7 @@ def test_mode_changed_in_place_by_the_sort_is_not_polished():
     solver.sorting_strategy = flip
     σ, _ = solver.solve(mode=0)
     assert σ.real > 0
+    assert np.isnan(solver.last_error_estimate)
     solver.polish_steps = 0
     assert σ == solver.solve(mode=0)[0]
 
@@ -253,22 +286,31 @@ def _memoised(solver):
 
 def test_polish_repairs_the_tearing_mode_at_n256():
     """The motivating case: QZ is 2.6e-9 off the reference, the polish
-    3.3e-11. One QZ solve, about 15 s. Started from the reference itself,
+    3-5e-11 (the exact figures depend on the BLAS build). One QZ solve,
+    about 15 s. Started from the reference itself,
     with QZ's vector, the polish keeps it bit for bit (no-degrade rule)."""
     solver = _memoised(_tearing_solver(256))
     ref = TEARING_N256_MODE0
     σ, _ = solver.solve(mode=0)
     assert abs(σ - ref) <= 1e-9 * abs(ref)
+    # The error estimate bounds the error by the study's 1.275·T and is
+    # not vacuous (T is 6.6 times the error).
+    T = solver.last_error_estimate
+    assert abs(σ - ref) <= 1.275 * T
+    assert T <= 100 * abs(σ - ref)
     # Relative, so that a LAPACK build with a better QZ does not fail it.
     solver.polish_steps = 0
     σ0, v0 = solver.solve(mode=0)
     assert abs(σ - ref) < abs(σ0 - ref) / 10
+    assert np.isnan(solver.last_error_estimate)
 
     A, B = _pencil(solver)
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
         σk, _ = solver._polish_pair(A, B, ref, v0, 2)
     assert σk == ref
+    # Kept, the start still comes with a finite estimate.
+    assert np.isfinite(solver._polish_error_estimate)
 
 
 def test_polished_conjugate_pair_stays_paired():
@@ -358,6 +400,10 @@ def test_gpu_like_start_is_kept():
         warnings.simplefilter("error", RuntimeWarning)
         σk, _ = solver._polish_pair(A, None, σg, v, 2)
     assert σk == σg
+    # The kept start comes with a finite estimate that bounds its error.
+    T = solver._polish_error_estimate
+    assert np.isfinite(T)
+    assert abs(σk - exact) <= 1.275 * T
 
 
 def test_one_step_rule_rests_on_the_floor_alone(monkeypatch):
@@ -395,6 +441,9 @@ def test_one_step_rule_rests_on_the_floor_alone(monkeypatch):
     assert len(floors) == 3
     assert σk == σ
     assert abs(σp - σ) <= floors[-1]
+    # With one step the error estimate is the floor alone (not validated
+    # by the study, which used two steps).
+    assert solver._polish_error_estimate == floors[-1]
 
 
 #: A start decided by the jitter term, in exact arithmetic. On A =
@@ -472,6 +521,7 @@ def test_mode_left_infinite_by_the_sort_is_not_polished(monkeypatch):
     σ, _ = solver.solve(mode=0)
     assert np.isinf(σ)
     assert not called
+    assert np.isnan(solver.last_error_estimate)
 
 
 # -- guards ------------------------------------------------------------------
@@ -496,6 +546,8 @@ def test_lu_failure_keeps_the_pair(monkeypatch):
     monkeypatch.setattr(solver_mod, "lu_factor", fail)
     solver = _tearing_solver()
     results = _refused_twice(lambda: solver.solve(mode=0), "LU")
+    assert np.isnan(solver.last_error_estimate)
+    assert np.isnan(solver.system.result["error_estimate"])
     σ_ref, v_ref, _, _ = _unpolished(solver, 0)
     for σ, v in results:
         assert σ == σ_ref
@@ -512,6 +564,7 @@ def test_mode_jump_keeps_the_pair():
         solver_mod._polish_warned.clear()
         results = _refused_twice(
             lambda: solver._polish_pair(A, B, 1.9, v, 2), "overlap")
+        assert np.isnan(solver._polish_error_estimate)
         for σ, w in results:
             assert σ == 1.9 and w is v
 
@@ -528,6 +581,7 @@ def test_nearer_to_another_eigenvalue_keeps_the_pair():
         lambda: solver._polish_pair(A, None, 2.01, v, 2,
                                     others=np.array([1.0, 2 + 1e-6, 3.0])),
         "nearer")
+    assert np.isnan(solver._polish_error_estimate)
     for σ, w in results:
         assert σ == 2.01 and w is v
 
@@ -542,6 +596,7 @@ def test_backward_error_floor_keeps_the_pair():
     σs, vs = _perturbed(σ_ref, v_ref, 1e-8, seed=0)
     results = _refused_twice(lambda: solver._polish_pair(A, B, σs, vs, 2),
                              "backward error")
+    assert np.isnan(solver._polish_error_estimate)
     for σ, v in results:
         assert σ == σs and v is vs
 

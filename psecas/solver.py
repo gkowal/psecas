@@ -314,6 +314,9 @@ class Solver:
         self.gpu_min_size = dense_eig.GPU_MIN_SIZE
         # Backend that produced the last dense solve ("cupy" or "scipy").
         self.last_backend = None
+        # Error estimate of the eigenvalue the last solve() returned; NaN
+        # when there is none (see solve()).
+        self.last_error_estimate = np.nan
 
         # Check that variable names are unique, i.e., that variables
         # are not a substring of another variable
@@ -361,15 +364,17 @@ class Solver:
 
     #: Names that cannot be used for a variable or the eigenvalue.
     #:
-    #: "mode", "converged", "error", "r_err" and "a_err" are metadata keys
-    #: that keep_result() and the iterative drivers write into system.result
+    #: "mode", "converged", "error", "r_err", "a_err" and "error_estimate"
+    #: are metadata keys that keep_result(), solve() and the iterative
+    #: drivers write into system.result
     #: alongside the eigenmode profiles, so a variable of that name would
     #: have its profile silently overwritten. "grid" is additionally the name
     #: the Grid object is bound to in the namespace equations are evaluated
     #: in, so a variable called "grid" shadows it and the equation fails to
     #: parse with an unrelated-looking AttributeError.
     RESERVED_NAMES = frozenset(
-        {"mode", "converged", "error", "grid", "r_err", "a_err"}
+        {"mode", "converged", "error", "grid", "r_err", "a_err",
+         "error_estimate"}
     )
 
     def _check_reserved_names(self):
@@ -1215,11 +1220,18 @@ class Solver:
         (σ, v) comes back unchanged, with a one-time RuntimeWarning; keeping
         σ by the no-degrade rule is not a refusal and does not warn. See
         solve() for the guards.
+
+        Sets self._polish_error_estimate to the error estimate of the
+        returned σ, max(POLISH_JITTER_FACTOR·|σ₂ - σ₁|, floor), the
+        threshold of the no-degrade rule, whether σ' or the input σ is
+        returned; NaN when a guard refuses the result.
         """
         from scipy.linalg import LinAlgWarning
 
         σ_old, v_old = σ, v
         n = A.shape[0]
+        # Set on every return that is not a refusal.
+        self._polish_error_estimate = np.nan
 
         def B_dot(x):
             return x if B is None else B @ x
@@ -1306,8 +1318,8 @@ class Solver:
             floor = _rayleigh_floor(A, B, s, x, y)
             jitter = (abs(quotients[-1] - quotients[-2])
                       if len(quotients) >= 2 else 0.0)
-            keep = abs(s - σ_old) <= max(self.POLISH_JITTER_FACTOR * jitter,
-                                         floor)
+            threshold = max(self.POLISH_JITTER_FACTOR * jitter, floor)
+            keep = abs(s - σ_old) <= threshold
             σ_new = σ_old if keep else s
 
             # Return σ_new with whichever vector has the smaller residual
@@ -1325,6 +1337,7 @@ class Solver:
             # to the unpolished pair coming back unchanged: the polish did
             # not produce it, and keeping it is no refusal to warn about.
             if keep and v_new is v_old:
+                self._polish_error_estimate = float(threshold)
                 return σ_new, v_new
             be = dense_eig._backward_errors(A, B, np.array([σ_new]),
                                             v_new[:, None])[0]
@@ -1334,6 +1347,7 @@ class Solver:
                              .format(self.GEVP_RESIDUAL_TOL, be, σ_old))
                 return σ_old, v_old
 
+        self._polish_error_estimate = float(threshold)
         return σ_new, v_new
 
     def solve(self, useOPinv=_UNSET, verbose=False, mode=0, saveall=False):
@@ -1424,6 +1438,28 @@ class Solver:
         term is 0 and the test rests on the floor alone, which in the study
         let wrong polishes through at tearing N=512.
 
+        Error estimate
+
+        After each call, self.last_error_estimate (also stored as
+        self.system.result["error_estimate"]) holds an absolute error
+        estimate of the returned eigenvalue, whether σ' or the kept σ₀:
+
+            T = max(self.POLISH_JITTER_FACTOR·|σ₂ - σ₁|, floor),
+
+        the threshold of the no-degrade rule above. It is empirical, not a
+        bound: in the study of the rule (1628 calls with two successful
+        steps, on the 11 pencils listed above) the error of the returned
+        eigenvalue never exceeded 1.275·T. It estimates the distance to
+        the eigenvalue of the discretised pencil (M₁, M₂) at this N, not
+        the discretisation error, i.e. not the distance to the eigenvalue
+        of the continuous problem; for that, compare resolutions. With one
+        successful step (polish_steps = 1, or a second step that fails) T
+        is the floor alone; that case was not validated, for the reason
+        given above. T is NaN when there is no estimate: polish_steps = 0,
+        a mode that is not polished (see below), and a polish refused by a
+        guard. It is set afresh by every call to solve(), so a value from
+        an earlier solve never survives.
+
         The returned eigenvalue σ (σ' or σ₀) comes with whichever of the
         unpolished vector v₀ and the polished vector v' has the smaller
         relative residual ‖M₁v - σM₂v‖ / (‖M₁v‖ + |σ|‖M₂v‖). On
@@ -1472,6 +1508,10 @@ class Solver:
                 DeprecationWarning, stacklevel=2,
             )
 
+        # Reset first, so that no estimate of an earlier solve survives
+        # this one, even should it raise.
+        self.last_error_estimate = np.nan
+
         # Calculate right-hand matrix
         self.get_matrix1()
         if self.do_gen_evp:
@@ -1498,8 +1538,12 @@ class Solver:
             B = self.mat2.toarray() if self.do_gen_evp else None
             others = np.delete(E_raw, i)
             others = others[np.isfinite(others)]
+            # Reset here too, in case _polish_pair is replaced by one that
+            # does not set it.
+            self._polish_error_estimate = np.nan
             sigma, v = self._polish_pair(A, B, E_raw[i], V[:, i],
                                          self.polish_steps, others=others)
+            self.last_error_estimate = self._polish_error_estimate
             polished = True
 
         # Save all eigenvalues and eigenvectors here
@@ -1516,6 +1560,8 @@ class Solver:
             print("N: {}, all eigenvalues: {}".format(self.grid.N, sigma))
 
         self.keep_result(sigma, v, mode)
+        self.system.result.update(
+            {"error_estimate": self.last_error_estimate})
 
         return (sigma, v)
 
